@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const multer = require('multer');
+const moment = require('moment-timezone');
 const { v4: uuidv4 } = require('uuid');
 const app = express();
 const port = 3000;
@@ -9,6 +10,7 @@ const port = 3000;
 app.set('trust proxy', 1);
 app.set('json spaces', 2);
 
+moment.tz.setDefault('Asia/Jakarta');
 // Konfigurasi
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, 'uploads/'),
@@ -35,30 +37,38 @@ const writeJSON = async (file, data) => {
   await fs.writeFile(path.join(dataPath, `${file}.json`), JSON.stringify(data, null, 2));
 };
 
+const generatePurchaseID = async () => {
+  const now = moment();
+  const datePart = now.format('DDMMYY');
+  const counterKey = now.format('YYYY-MM-DD');
+  
+  let counters = await readJSON('purchase-counters');
+  let counter = counters.find(c => c.date === counterKey);
+  
+  if (!counter) {
+    counter = { date: counterKey, sequence: 0 };
+    counters.push(counter);
+  }
+  
+  counter.sequence++;
+  await writeJSON('purchase-counters', counters);
+  
+  return `${datePart}${counter.sequence.toString().padStart(3, '0')}`;
+};
+
 // Middleware API Key
 const apiKeyAuth = async (req, res, next) => {
   const apiKey = req.header('X-API-Key');
-  console.log(`[AUTH] Checking API Key: ${apiKey}`);
-
-  if (!apiKey) {
-    console.log('[AUTH] No API Key provided');
-    return res.status(401).json({ status: false, error: 'API Key required' });
-  }
+  if (!apiKey) return res.status(401).json({ status: false, error: 'API Key required' });
 
   try {
     const keys = await readJSON('api-keys');
     const validKey = keys.find(k => k.key === apiKey);
-
-    if (!validKey) {
-      console.log('[AUTH] Invalid API Key');
-      return res.status(403).json({ status: false, error: 'Invalid API Key' });
-    }
+    if (!validKey) return res.status(403).json({ status: false, error: 'Invalid API Key' });
 
     req.user = validKey.user;
-    console.log(`[AUTH] Authenticated user: ${validKey.user}`);
     next();
   } catch (error) {
-    console.error('[AUTH ERROR]', error);
     res.status(500).json({ status: false, error: error.message });
   }
 };
@@ -72,68 +82,52 @@ const generateID = () => {
 
 // Logging
 const logAction = async (user, action) => {
-  console.log(`[LOG ACTION] User: ${user}, Action: ${action}`);
   try {
     const logs = await readJSON('logs');
     logs.push({ 
-      timestamp: new Date().toISOString(),
+      timestamp: moment().format(),
       user,
       action 
     });
     await writeJSON('logs', logs);
   } catch (error) {
-    console.error('[LOG ACTION ERROR]', error);
+    console.error('Logging error:', error);
   }
 };
 
 // Routes
 app.get('/items/:id', apiKeyAuth, async (req, res) => {
-  console.log(`[GET ITEM] ID: ${req.params.id}`);
   try {
     const items = await readJSON('items');
     const item = items.find(i => i.id === req.params.id);
-
-    if (!item) {
-      console.log(`[GET ITEM] Item not found: ${req.params.id}`);
-      return res.status(404).json({ status: false, error: 'Item not found' });
-    }
-
-    res.json({ status: true, data: item });
+    item ? res.json({ status: true, data: item }) : res.status(404).json({ status: false, error: 'Item not found' });
   } catch (error) {
-    console.error('[GET ITEM ERROR]', error);
     res.status(500).json({ status: false, error: error.message });
   }
 });
 
 app.post('/items', apiKeyAuth, async (req, res) => {
-  console.log('[CREATE ITEM] Request body:', req.body);
   try {
     const items = await readJSON('items');
     const itemName = req.body.name.trim().toLowerCase();
     const existing = items.find(i => i.name.trim().toLowerCase() === itemName);
 
     if (existing) {
-      console.log(`[CREATE ITEM] Updating stock for: ${existing.name}`);
       existing.stock += parseInt(req.body.stock) || 0;
-      await logAction(req.user, `Stock updated for ${existing.name}`);
     } else {
-      const newItem = {
-        id: generateID(),
+      items.push({
+        id: uuidv4(),
         ...req.body,
         name: req.body.name.trim(),
+        category: req.body.category || 'uncategorized',
         photo: null,
-        discount: 0,
         stock: parseInt(req.body.stock) || 0
-      };
-      console.log(`[CREATE ITEM] New item created: ${newItem.name}`);
-      items.push(newItem);
-      await logAction(req.user, `New item created: ${newItem.name}`);
+      });
     }
 
     await writeJSON('items', items);
     res.status(201).json({ status: true, data: items });
   } catch (error) {
-    console.error('[CREATE ITEM ERROR]', error);
     res.status(500).json({ status: false, error: error.message });
   }
 });
@@ -197,68 +191,143 @@ app.delete('/items/:id', apiKeyAuth, async (req, res) => {
 });
 
 app.post('/sales', apiKeyAuth, async (req, res) => {
-  console.log('[CREATE SALE] Request body:', req.body);
   try {
-    const { buyer, items: saleItems } = req.body;
-
+    const { buyer, items: saleItems, amount } = req.body;
     if (!buyer || !saleItems || !Array.isArray(saleItems)) {
-      console.log('[CREATE SALE] Invalid request format');
       return res.status(400).json({ status: false, error: 'Invalid request format' });
     }
 
-    const date = new Date();
-    const salesFile = `sales-${date.getFullYear()}-${date.getMonth()+1}`;
-    console.log(`[CREATE SALE] Using sales file: ${salesFile}`);
+    const transactionDate = moment();
+    const dailySalesFile = `sales-${transactionDate.format('YYYY-MM-DD')}`;
+    const monthlySalesFile = `sales-${transactionDate.format('YYYY-MM')}`;
 
-    const store = await readJSON('store');
-    const sale = {
-      id: uuidv4(),
-      timestamp: date.toISOString(),
-      cashier: store.cashier || 'Unknown',
-      buyer,
-      items: [],
-      total: 0
-    };
-
+    // Hitung total transaksi
     const allItems = await readJSON('items');
+    let total = 0;
+    const itemsWithDetails = [];
+    
     for (const item of saleItems) {
-      console.log(`[CREATE SALE] Processing item: ${item.id}`);
       const product = allItems.find(p => p.id === item.id);
+      if (!product) return res.status(400).json({ status: false, error: `Item ${item.id} not found` });
+      if (product.stock < item.qty) return res.status(400).json({ status: false, error: `Insufficient stock for ${product.name}` });
 
-      if (!product) {
-        console.log(`[CREATE SALE] Item not found: ${item.id}`);
-        return res.status(400).json({ status: false, error: `Item ${item.id} not found` });
-      }
-
-      if (product.stock < item.qty) {
-        console.log(`[CREATE SALE] Insufficient stock for: ${product.name}`);
-        return res.status(400).json({ status: false, error: `Insufficient stock for ${product.name}` });
-      }
-
-      product.stock -= item.qty;
       const price = product.price * (1 - (product.discount/100));
-      sale.items.push({
+      const itemTotal = item.qty * price;
+      total += itemTotal;
+      
+      itemsWithDetails.push({
         ...item,
         name: product.name,
         price,
-        total: item.qty * price
+        total: itemTotal
       });
-      sale.total += item.qty * price;
+
+      product.stock -= item.qty;
     }
 
-    const sales = await readJSON(salesFile);
-    sales.push(sale);
+    // Validasi pembayaran
+    if (amount < total) {
+      return res.status(400).json({ status: false, error: 'Insufficient payment' });
+    }
+
+    // Simpan transaksi
+    const transaction = {
+      id: await generatePurchaseID(),
+      timestamp: transactionDate.format(),
+      cashier: req.user,
+      buyer,
+      items: itemsWithDetails,
+      total,
+      payment: amount,
+      change: amount - total
+    };
+
+    const [dailySales, monthlySales] = await Promise.all([
+      readJSON(dailySalesFile),
+      readJSON(monthlySalesFile)
+    ]);
 
     await Promise.all([
       writeJSON('items', allItems),
-      writeJSON(salesFile, sales)
+      writeJSON(dailySalesFile, [...dailySales, transaction]),
+      writeJSON(monthlySalesFile, [...monthlySales, transaction])
     ]);
 
-    await logAction(req.user, `New sale: ${sale.id}`);
-    console.log(`[CREATE SALE] Success: ${sale.id}`);
-    res.status(201).json({ status: true, data: sale });
+    res.status(201).json({ status: true, data: transaction });
   } catch (error) {
-    console.error('[CREATE SALE ERROR]', error);
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
+app.get('/reports/daily/:date', apiKeyAuth, async (req, res) => {
+  try {
+    const sales = await readJSON(`sales-${req.params.date}`);
+    const totalRevenue = sales.reduce((sum, t) => sum + t.total, 0);
+    
+    res.json({
+      status: true,
+      data: {
+        date: req.params.date,
+        total_transactions: sales.length,
+        total_revenue: totalRevenue,
+        transactions: sales
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
+app.get('/reports/monthly/:yearMonth', apiKeyAuth, async (req, res) => {
+  try {
+    const sales = await readJSON(`sales-${req.params.yearMonth}`);
+    const totalRevenue = sales.reduce((sum, t) => sum + t.total, 0);
+    
+    // Hitung pelanggan teratas
+    const customerSpending = sales.reduce((acc, t) => {
+      acc[t.buyer] = (acc[t.buyer] || 0) + t.total;
+      return acc;
+    }, {});
+    
+    // Hitung barang populer
+    const itemSales = sales.reduce((acc, t) => {
+      t.items.forEach(item => {
+        acc[item.id] = (acc[item.id] || 0) + item.qty;
+      });
+      return acc;
+    }, {});
+
+    res.json({
+      status: true,
+      data: {
+        month: req.params.yearMonth,
+        total_transactions: sales.length,
+        total_revenue: totalRevenue,
+        top_customers: Object.entries(customerSpending)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10),
+        popular_items: Object.entries(itemSales)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10),
+        daily_transactions: sales
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
+app.get('/stock/category', apiKeyAuth, async (req, res) => {
+  try {
+    const items = await readJSON('items');
+    const stockByCategory = items.reduce((acc, item) => {
+      const category = item.category || 'uncategorized';
+      acc[category] = (acc[category] || 0) + item.stock;
+      return acc;
+    }, {});
+    
+    res.json({ status: true, data: stockByCategory });
+  } catch (error) {
     res.status(500).json({ status: false, error: error.message });
   }
 });
@@ -377,34 +446,6 @@ app.get('/logs', apiKeyAuth, async (req, res) => {
     res.json({ status: true, data: logs });
   } catch (error) {
     console.error('[GET LOGS ERROR]', error);
-    res.status(500).json({ status: false, error: error.message });
-  }
-});
-
-app.get('/reports/monthly-sales', apiKeyAuth, async (req, res) => {
-  console.log('[REPORT MONTHLY SALES] Request received');
-  try {
-    const files = await fs.readdir(dataPath);
-    const salesFiles = files.filter(f => f.startsWith('sales-') && f.endsWith('.json'));
-    console.log(`[REPORT MONTHLY SALES] Found ${salesFiles.length} sales files`);
-
-    const monthlySales = [];
-    for (const file of salesFiles) {
-      const match = file.match(/sales-(\d{4})-(\d{1,2})\.json/);
-      if (!match) continue;
-
-      const year = parseInt(match[1]);
-      const month = parseInt(match[2]);
-      const sales = await readJSON(path.parse(file).name);
-      const total = sales.reduce((sum, sale) => sum + sale.total, 0);
-
-      monthlySales.push({ year, month, total });
-    }
-
-    monthlySales.sort((a, b) => a.year - b.year || a.month - b.month);
-    res.json({ status: true, data: monthlySales });
-  } catch (error) {
-    console.error('[REPORT MONTHLY SALES ERROR]', error);
     res.status(500).json({ status: false, error: error.message });
   }
 });

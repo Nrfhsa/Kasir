@@ -26,6 +26,10 @@ const isAdmin = (req, res, next) => {
   }
 };
 
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 // Tambah barang
 app.post('/items', isAdmin, (req, res) => {
   const { name, price, stock } = req.body;

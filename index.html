@@ -1,208 +1,387 @@
-<!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aplikasi Kasir</title>
-    <style>
-        /* [Tetap sama dengan style sebelumnya] */
-    </style>
-</head>
-<body>
-    <h1>Aplikasi Kasir</h1>
-
-    <div class="container">
-        <!-- Tambah Barang (Admin) -->
-        <div class="section admin">
-            <h2>Tambah Barang</h2>
-            <input type="password" id="adminSecret" placeholder="Admin Secret">
-            <input type="text" id="itemName" placeholder="Nama Barang">
-            <input type="number" id="itemPrice" placeholder="Harga">
-            <input type="number" id="itemStock" placeholder="Stok">
-            <button onclick="addItem()">Tambah Barang</button>
-        </div>
-
-        <!-- Transaksi Baru -->
-        <div class="section">
-            <h2>Transaksi Baru</h2>
-            <input type="text" id="buyerName" placeholder="Nama Pembeli">
-            <div id="transactionItems"></div>
-            <button onclick="showItemSelection()">Pilih Barang</button>
-            <button onclick="processSale()">Proses Transaksi</button>
-        </div>
-
-        <!-- Daftar Stok -->
-        <div class="section">
-            <h2>Stok Barang</h2>
-            <button onclick="fetchStock()">Refresh Stok</button>
-            <div id="stockList"></div>
-        </div>
+ <head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>
+   Admin Toko - Kasir Digital
+  </title>
+  <script src="https://cdn.tailwindcss.com">
+  </script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet"/>
+  <style>
+   .sidebar {
+            transform: translateX(-100%);
+            transition: transform 0.3s ease-in-out;
+        }
+        .sidebar.active {
+            transform: translateX(0);
+        }
+  </style>
+ </head>
+ <body class="bg-gray-100">
+  <div class="min-h-screen flex">
+   <!-- Sidebar Menu -->
+   <nav class="bg-gray-800 text-white w-64 p-6 fixed inset-y-0 left-0 z-50 sidebar">
+    <div class="flex justify-between items-center mb-6">
+     <h3 class="text-2xl font-semibold">
+      Menu Admin
+     </h3>
+     <button class="text-white" onclick="toggleSidebar()">
+      <i class="fas fa-times">
+      </i>
+     </button>
     </div>
-
-    <div class="container">
-        <!-- Laporan Penjualan -->
-        <div class="section">
-            <h2>Laporan Penjualan</h2>
-            <input type="number" id="month" placeholder="Bulan" min="1" max="12">
-            <input type="number" id="year" placeholder="Tahun">
-            <button onclick="fetchSalesReport()">Tampilkan</button>
-            <div id="salesReport"></div>
-        </div>
-
-        <!-- Statistik -->
-        <div class="section">
-            <h2>Statistik</h2>
-            <div id="stats">
-                <button onclick="fetchPopular()">Barang Populer</button>
-                <button onclick="fetchTopBuyers()">Top Pembeli</button>
-                <div id="popularItems"></div>
-                <div id="topBuyers"></div>
-            </div>
-        </div>
+    <ul>
+     <li class="mb-4">
+      <a class="hover:text-gray-400" href="#" onclick="showTab('items')">
+       Manajemen Barang
+      </a>
+     </li>
+     <li class="mb-4">
+      <a class="hover:text-gray-400" href="#" onclick="showTab('sales')">
+       Transaksi
+      </a>
+     </li>
+     <li class="mb-4">
+      <a class="hover:text-gray-400" href="#" onclick="showTab('reports')">
+       Laporan
+      </a>
+     </li>
+     <li class="mb-4">
+      <a class="hover:text-gray-400" href="#" onclick="showTab('store')">
+       Pengaturan Toko
+      </a>
+     </li>
+     <li class="mb-4">
+      <a class="hover:text-gray-400" href="#" onclick="showTab('logs')">
+       Log Aktivitas
+      </a>
+     </li>
+    </ul>
+   </nav>
+   <!-- Main Content -->
+   <div class="flex-1 p-6">
+    <button class="text-gray-800 mb-6" onclick="toggleSidebar()">
+     <i class="fas fa-bars text-2xl">
+     </i>
+    </button>
+    <!-- Items Management Tab -->
+    <div class="tab-content active-tab" id="items">
+     <h2 class="text-3xl font-semibold mb-6">
+      Manajemen Barang
+     </h2>
+     <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+      <h3 class="text-2xl font-semibold mb-4">
+       Tambah/Edit Barang
+      </h3>
+      <form id="itemForm" onsubmit="saveItem(event)">
+       <input id="itemId" type="hidden"/>
+       <div class="mb-4">
+        <label class="block text-gray-700">
+         Nama Barang
+        </label>
+        <input class="w-full p-2 border border-gray-300 rounded" id="itemName" required="" type="text"/>
+       </div>
+       <div class="mb-4">
+        <label class="block text-gray-700">
+         Harga
+        </label>
+        <input class="w-full p-2 border border-gray-300 rounded" id="itemPrice" required="" type="number"/>
+       </div>
+       <div class="mb-4">
+        <label class="block text-gray-700">
+         Stok
+        </label>
+        <input class="w-full p-2 border border-gray-300 rounded" id="itemStock" required="" type="number"/>
+       </div>
+       <div class="mb-4">
+        <label class="block text-gray-700">
+         Diskon (%)
+        </label>
+        <input class="w-full p-2 border border-gray-300 rounded" id="itemDiscount" max="100" min="0" type="number"/>
+       </div>
+       <div class="flex space-x-4">
+        <button class="bg-blue-500 text-white px-4 py-2 rounded" type="submit">
+         Simpan
+        </button>
+        <button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="uploadItemPhoto()" type="button">
+         Upload Foto
+        </button>
+       </div>
+      </form>
+     </div>
+     <h3 class="text-2xl font-semibold mb-4">
+      Daftar Barang
+     </h3>
+     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="itemsList">
+     </div>
     </div>
-
-    <!-- Modal Pilih Barang -->
-    <div id="itemModal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h3>Pilih Barang</h3>
-            <div id="itemSelection"></div>
-        </div>
+    <!-- Sales Tab -->
+    <div class="tab-content hidden" id="sales">
+     <h2 class="text-3xl font-semibold mb-6">
+      Manajemen Transaksi
+     </h2>
+     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="bg-white p-6 rounded-lg shadow-lg">
+       <h3 class="text-2xl font-semibold mb-4">
+        Transaksi Baru
+       </h3>
+       <div class="mb-4" id="cartItems">
+       </div>
+       <input class="w-full p-2 border border-gray-300 rounded mb-4" id="customerName" placeholder="Nama Pelanggan" type="text"/>
+       <button class="bg-blue-500 text-white px-4 py-2 rounded" onclick="processSale()">
+        Proses Transaksi
+       </button>
+      </div>
+      <div class="bg-white p-6 rounded-lg shadow-lg">
+       <h3 class="text-2xl font-semibold mb-4">
+        Riwayat Transaksi
+       </h3>
+       <input class="w-full p-2 border border-gray-300 rounded mb-4" id="salesMonth" onchange="loadSales()" type="month"/>
+       <div id="salesList">
+       </div>
+      </div>
+     </div>
     </div>
+    <!-- Reports Tab -->
+    <div class="tab-content hidden" id="reports">
+     <h2 class="text-3xl font-semibold mb-6">
+      Laporan
+     </h2>
+     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="bg-white p-6 rounded-lg shadow-lg">
+       <h3 class="text-2xl font-semibold mb-4">
+        Stok Barang
+       </h3>
+       <div id="stockReport">
+       </div>
+      </div>
+      <div class="bg-white p-6 rounded-lg shadow-lg">
+       <h3 class="text-2xl font-semibold mb-4">
+        Barang Populer
+       </h3>
+       <div id="popularReport">
+       </div>
+      </div>
+      <div class="bg-white p-6 rounded-lg shadow-lg">
+       <h3 class="text-2xl font-semibold mb-4">
+        Pelanggan Terbaik
+       </h3>
+       <div id="customerReport">
+       </div>
+      </div>
+     </div>
+    </div>
+    <!-- Store Settings Tab -->
+    <div class="tab-content hidden" id="store">
+     <h2 class="text-3xl font-semibold mb-6">
+      Pengaturan Toko
+     </h2>
+     <div class="bg-white p-6 rounded-lg shadow-lg">
+      <form onsubmit="saveStoreSettings(event)">
+       <div class="mb-4">
+        <label class="block text-gray-700">
+         Nama Toko
+        </label>
+        <input class="w-full p-2 border border-gray-300 rounded" id="storeName" required="" type="text"/>
+       </div>
+       <div class="mb-4">
+        <label class="block text-gray-700">
+         Alamat
+        </label>
+        <textarea class="w-full p-2 border border-gray-300 rounded" id="storeAddress" required="">
+        </textarea>
+       </div>
+       <div class="mb-4">
+        <label class="block text-gray-700">
+         Nama Kasir
+        </label>
+        <input class="w-full p-2 border border-gray-300 rounded" id="storeCashier" required="" type="text"/>
+       </div>
+       <div class="mb-4">
+        <label class="block text-gray-700">
+         Logo Toko
+        </label>
+        <input accept="image/*" class="w-full p-2 border border-gray-300 rounded" id="storeLogo" type="file"/>
+        <img alt="Preview logo toko" class="preview-logo mt-4" id="logoPreview" src="https://placehold.co/200x200"/>
+       </div>
+       <button class="bg-blue-500 text-white px-4 py-2 rounded" type="submit">
+        Simpan
+       </button>
+      </form>
+     </div>
+    </div>
+    <!-- Logs Tab -->
+    <div class="tab-content hidden" id="logs">
+     <h2 class="text-3xl font-semibold mb-6">
+      Log Aktivitas
+     </h2>
+     <div class="bg-white p-6 rounded-lg shadow-lg">
+      <div id="logList">
+      </div>
+     </div>
+    </div>
+   </div>
+  </div>
+  <script>
+   const API_BASE = 'http://localhost:3000';
+        const API_KEY = 'DEFAULT_KEY';
 
-    <script>
-        const API_URL = 'https://kasir-production.up.railway.app';
-        let transactionItems = [];
-        
-        // Fungsi untuk menampilkan modal pemilihan barang
-        async function showItemSelection() {
-            const response = await fetch(`${API_URL}/stock`);
-            const items = await response.json();
-            
-            let html = '<table>';
-            items.forEach(item => {
-                html += `
-                <tr>
-                    <td>${item.name}</td>
-                    <td>
-                        <input type="number" id="qty-${item.id}" min="1" value="1">
-                        <button onclick="addToTransaction('${item.id}', ${item.stock})">Tambah</button>
-                    </td>
-                </tr>`;
+        // Tab Management
+        function showTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.add('hidden');
             });
-            html += '</table>';
-            
-            document.getElementById('itemSelection').innerHTML = html;
-            document.getElementById('itemModal').style.display = 'block';
+            document.getElementById(tabId).classList.remove('hidden');
+            toggleSidebar();
         }
 
-        // Tambah barang ke transaksi
-        function addToTransaction(itemId, maxStock) {
-            const input = document.getElementById(`qty-${itemId}`);
-            const quantity = parseInt(input.value);
-            
-            if (quantity > 0 && quantity <= maxStock) {
-                transactionItems.push({
-                    id: itemId,
-                    quantity: quantity
+        // Sidebar Management
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('active');
+        }
+
+        // Item Management
+        async function saveItem(e) {
+            e.preventDefault();
+            const itemData = {
+                name: document.getElementById('itemName').value,
+                price: document.getElementById('itemPrice').value,
+                stock: document.getElementById('itemStock').value,
+                discount: document.getElementById('itemDiscount').value || 0
+            };
+
+            const method = document.getElementById('itemId').value ? 'PUT' : 'POST';
+            const url = method === 'POST' ? 
+                `${API_BASE}/items` : 
+                `${API_BASE}/items/${document.getElementById('itemId').value}`;
+
+            try {
+                const response = await fetch(url, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': API_KEY
+                    },
+                    body: JSON.stringify(itemData)
                 });
-                updateTransactionDisplay();
-            } else {
-                alert(`Jumlah tidak valid! Stok tersedia: ${maxStock}`);
+                await loadItems();
+                resetItemForm();
+            } catch (error) {
+                alert('Gagal menyimpan barang');
             }
         }
 
-        // Proses transaksi
-        async function processSale() {
-            const buyerName = document.getElementById('buyerName').value;
-            
-            const response = await fetch(`${API_URL}/sales`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    buyerName,
-                    items: transactionItems
-                })
+        async function loadItems() {
+            const response = await fetch(`${API_BASE}/items`, {
+                headers: { 'X-API-Key': API_KEY }
+            });
+            const items = await response.json();
+            renderItems(items);
+        }
+
+        function renderItems(items) {
+            const container = document.getElementById('itemsList');
+            container.innerHTML = items.map(item => `
+                <div class="bg-white p-4 rounded-lg shadow-lg">
+                    ${item.photo ? `<img src="${API_BASE}${item.photo}" class="h-24 w-full object-cover mb-4" alt="Foto barang ${item.name}">` : ''}
+                    <h4 class="text-xl font-semibold mb-2">${item.name}</h4>
+                    <p class="text-gray-700 mb-2">Harga: Rp ${item.price}</p>
+                    <p class="text-gray-700 mb-2">Stok: ${item.stock}</p>
+                    <p class="text-gray-700 mb-4">Diskon: ${item.discount}%</p>
+                    <div class="flex space-x-2">
+                        <button onclick="editItem('${item.id}')" class="bg-yellow-500 text-white px-4 py-2 rounded">Edit</button>
+                        <button onclick="deleteItem('${item.id}')" class="bg-red-500 text-white px-4 py-2 rounded">Hapus</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function uploadItemPhoto(itemId) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = async (e) => {
+                const formData = new FormData();
+                formData.append('photo', e.target.files[0]);
+                
+                await fetch(`${API_BASE}/items/${itemId}/photo`, {
+                    method: 'POST',
+                    headers: { 'X-API-Key': API_KEY },
+                    body: formData
+                });
+                loadItems();
+            };
+            input.click();
+        }
+
+        // Store Management
+        async function saveStoreSettings(e) {
+            e.preventDefault();
+            const storeData = {
+                name: document.getElementById('storeName').value,
+                address: document.getElementById('storeAddress').value,
+                cashier: document.getElementById('storeCashier').value
+            };
+
+            await fetch(`${API_BASE}/store`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': API_KEY
+                },
+                body: JSON.stringify(storeData)
             });
 
-            const result = await response.json();
-            if (response.ok) {
-                alert(`Transaksi berhasil!\nTotal: Rp${result.total}`);
-                transactionItems = [];
-                updateTransactionDisplay();
-                fetchStock();
-            } else {
-                alert(`Error: ${result.error}`);
+            const logoFile = document.getElementById('storeLogo').files[0];
+            if (logoFile) {
+                const formData = new FormData();
+                formData.append('logo', logoFile);
+                await fetch(`${API_BASE}/store/logo`, {
+                    method: 'POST',
+                    headers: { 'X-API-Key': API_KEY },
+                    body: formData
+                });
             }
+            
+            loadStoreSettings();
         }
 
-        // Tampilkan item dalam transaksi
-        function updateTransactionDisplay() {
-            const div = document.getElementById('transactionItems');
-            div.innerHTML = '<h4>Item dalam Transaksi:</h4>';
-            
-            transactionItems.forEach((item, index) => {
-                div.innerHTML += `
-                <div>
-                    ${item.id} - Qty: ${item.quantity}
-                    <button onclick="removeTransactionItem(${index})">Hapus</button>
-                </div>`;
+        async function loadStoreSettings() {
+            const response = await fetch(`${API_BASE}/store`, {
+                headers: { 'X-API-Key': API_KEY }
             });
+            const store = await response.json();
+            
+            document.getElementById('storeName').value = store.name || '';
+            document.getElementById('storeAddress').value = store.address || '';
+            document.getElementById('storeCashier').value = store.cashier || '';
+            document.getElementById('logoPreview').src = store.logo ? 
+                `${API_BASE}${store.logo}` : 'https://placehold.co/200x200';
         }
 
-        // Hapus item dari transaksi
-        function removeTransactionItem(index) {
-            transactionItems.splice(index, 1);
-            updateTransactionDisplay();
+        // Logs Management
+        async function loadLogs() {
+            const response = await fetch(`${API_BASE}/logs`, {
+                headers: { 'X-API-Key': API_KEY }
+            });
+            const logs = await response.json();
+            
+            document.getElementById('logList').innerHTML = logs.map(log => `
+                <div class="log-entry mb-4">
+                    <p class="text-gray-700">[${new Date(log.timestamp).toLocaleString()}] 
+                    ${log.user}: ${log.action}</p>
+                </div>
+            `).join('');
         }
 
-        // [Fungsi-fungsi lainnya tetap sama dengan sebelumnya]
-        
-        // Modal handling
-        const modal = document.getElementById('itemModal');
-        const span = document.getElementsByClassName("close")[0];
-        
-        span.onclick = () => modal.style.display = "none";
-        window.onclick = (event) => {
-            if (event.target === modal) modal.style.display = "none";
-        }
-
-        // Style untuk modal
-        const style = document.createElement('style');
-        style.innerHTML = `
-            .modal {
-                display: none;
-                position: fixed;
-                z-index: 1;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                overflow: auto;
-                background-color: rgba(0,0,0,0.4);
-            }
-            
-            .modal-content {
-                background-color: #fefefe;
-                margin: 15% auto;
-                padding: 20px;
-                border: 1px solid #888;
-                width: 80%;
-            }
-            
-            .close {
-                color: #aaa;
-                float: right;
-                font-size: 28px;
-                font-weight: bold;
-            }
-            
-            .close:hover {
-                color: black;
-                cursor: pointer;
-            }
-        `;
-        document.head.appendChild(style);
-    </script>
-</body>
+        // Initialize
+        window.addEventListener('DOMContentLoaded', () => {
+            loadItems();
+            loadStoreSettings();
+            loadLogs();
+            showTab('items');
+        });
+  </script>
+ </body>
 </html>

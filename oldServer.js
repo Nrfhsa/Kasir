@@ -42,7 +42,7 @@ const apiKeyAuth = async (req, res, next) => {
 
   if (!apiKey) {
     console.log('[AUTH] No API Key provided');
-    return res.status(401).json({ error: 'API Key required' });
+    return res.status(401).json({ status: false, error: 'API Key required' });
   }
 
   try {
@@ -51,7 +51,7 @@ const apiKeyAuth = async (req, res, next) => {
 
     if (!validKey) {
       console.log('[AUTH] Invalid API Key');
-      return res.status(403).json({ error: 'Invalid API Key' });
+      return res.status(403).json({ status: false, error: 'Invalid API Key' });
     }
 
     req.user = validKey.user;
@@ -59,7 +59,7 @@ const apiKeyAuth = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('[AUTH ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 };
 
@@ -95,13 +95,13 @@ app.get('/items/:id', apiKeyAuth, async (req, res) => {
 
     if (!item) {
       console.log(`[GET ITEM] Item not found: ${req.params.id}`);
-      return res.status(404).json({ error: 'Item not found' });
+      return res.status(404).json({ status: false, error: 'Item not found' });
     }
 
-    res.json(item);
+    res.json({ status: true, data: item });
   } catch (error) {
     console.error('[GET ITEM ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -109,9 +109,10 @@ app.post('/items', apiKeyAuth, async (req, res) => {
   console.log('[CREATE ITEM] Request body:', req.body);
   try {
     const items = await readJSON('items');
-    const existing = items.find(i => i.name === req.body.name);
+    const itemName = req.body.name.trim().toLowerCase();
+    const existing = items.find(i => i.name.trim().toLowerCase() === itemName);
 
-    if(existing) {
+    if (existing) {
       console.log(`[CREATE ITEM] Updating stock for: ${existing.name}`);
       existing.stock += parseInt(req.body.stock) || 0;
       await logAction(req.user, `Stock updated for ${existing.name}`);
@@ -119,6 +120,7 @@ app.post('/items', apiKeyAuth, async (req, res) => {
       const newItem = {
         id: generateID(),
         ...req.body,
+        name: req.body.name.trim(),
         photo: null,
         discount: 0,
         stock: parseInt(req.body.stock) || 0
@@ -129,10 +131,10 @@ app.post('/items', apiKeyAuth, async (req, res) => {
     }
 
     await writeJSON('items', items);
-    res.status(201).json(items);
+    res.status(201).json({ status: true, data: items });
   } catch (error) {
     console.error('[CREATE ITEM ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -142,18 +144,34 @@ app.put('/items/:id', apiKeyAuth, async (req, res) => {
     const items = await readJSON('items');
     const item = items.find(i => i.id === req.params.id);
 
-    if(!item) {
+    if (!item) {
       console.log(`[UPDATE ITEM] Item not found: ${req.params.id}`);
-      return res.status(404).json({ error: 'Item not found' });
+      return res.status(404).json({ status: false, error: 'Item not found' });
+    }
+
+    if (req.body.name) {
+      const newName = req.body.name.trim().toLowerCase();
+      const existingItem = items.find(i => 
+        i.id !== req.params.id && 
+        i.name.trim().toLowerCase() === newName
+      );
+
+      if (existingItem) {
+        return res.status(400).json({ 
+          status: false, 
+          error: 'Item name already exists' 
+        });
+      }
+      req.body.name = req.body.name.trim();
     }
 
     Object.assign(item, req.body);
     await writeJSON('items', items);
     await logAction(req.user, `Item updated: ${item.name}`);
-    res.json(item);
+    res.json({ status: true, data: item });
   } catch (error) {
     console.error('[UPDATE ITEM ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -164,17 +182,17 @@ app.delete('/items/:id', apiKeyAuth, async (req, res) => {
     const initialLength = items.length;
     items = items.filter(i => i.id !== req.params.id);
 
-    if(items.length === initialLength) {
+    if (items.length === initialLength) {
       console.log(`[DELETE ITEM] Item not found: ${req.params.id}`);
-      return res.status(404).json({ error: 'Item not found' });
+      return res.status(404).json({ status: false, error: 'Item not found' });
     }
 
     await writeJSON('items', items);
     await logAction(req.user, `Item deleted: ${req.params.id}`);
-    res.status(204).send();
+    res.status(200).json({ status: true, message: 'Item deleted successfully' });
   } catch (error) {
     console.error('[DELETE ITEM ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -185,7 +203,7 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
 
     if (!buyer || !saleItems || !Array.isArray(saleItems)) {
       console.log('[CREATE SALE] Invalid request format');
-      return res.status(400).json({ error: 'Invalid request format' });
+      return res.status(400).json({ status: false, error: 'Invalid request format' });
     }
 
     const date = new Date();
@@ -209,12 +227,12 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
 
       if (!product) {
         console.log(`[CREATE SALE] Item not found: ${item.id}`);
-        return res.status(400).json({ error: `Item ${item.id} not found` });
+        return res.status(400).json({ status: false, error: `Item ${item.id} not found` });
       }
 
       if (product.stock < item.qty) {
         console.log(`[CREATE SALE] Insufficient stock for: ${product.name}`);
-        return res.status(400).json({ error: `Insufficient stock for ${product.name}` });
+        return res.status(400).json({ status: false, error: `Insufficient stock for ${product.name}` });
       }
 
       product.stock -= item.qty;
@@ -238,10 +256,10 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
 
     await logAction(req.user, `New sale: ${sale.id}`);
     console.log(`[CREATE SALE] Success: ${sale.id}`);
-    res.status(201).json(sale);
+    res.status(201).json({ status: true, data: sale });
   } catch (error) {
     console.error('[CREATE SALE ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -249,10 +267,10 @@ app.get('/reports/stock', apiKeyAuth, async (req, res) => {
   console.log('[REPORT STOCK] Request received');
   try {
     const items = await readJSON('items');
-    res.json(items);
+    res.json({ status: true, data: items });
   } catch (error) {
     console.error('[REPORT STOCK ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -271,19 +289,28 @@ app.get('/reports/popular', apiKeyAuth, async (req, res) => {
 
     const itemCounts = allSales.reduce((acc, sale) => {
       sale.items.forEach(item => {
-        acc[item.id] = (acc[item.id] || 0) + item.qty;
+        const nameKey = item.name.trim().toLowerCase();
+        acc[nameKey] = (acc[nameKey] || 0) + item.qty;
       });
       return acc;
     }, {});
 
+    const items = await readJSON('items');
     const popularItems = Object.entries(itemCounts)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
+      .slice(0, 5)
+      .map(([nameKey, quantity]) => {
+        const item = items.find(i => 
+          i.name.trim().toLowerCase() === nameKey
+        );
+        return item ? { id: item.id, name: item.name, quantity } : null;
+      })
+      .filter(item => item !== null);
 
-    res.json(popularItems);
+    res.json({ status: true, data: popularItems });
   } catch (error) {
     console.error('[REPORT POPULAR ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -309,10 +336,10 @@ app.get('/reports/top-customers', apiKeyAuth, async (req, res) => {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    res.json(topCustomers);
+    res.json({ status: true, data: topCustomers });
   } catch (error) {
     console.error('[REPORT TOP CUSTOMERS ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -322,10 +349,10 @@ app.put('/store', apiKeyAuth, async (req, res) => {
     await writeJSON('store', req.body);
     await logAction(req.user, 'Store settings updated');
     console.log('[UPDATE STORE] Success');
-    res.json(req.body);
+    res.json({ status: true, data: req.body });
   } catch (error) {
     console.error('[UPDATE STORE ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -336,10 +363,10 @@ app.post('/store/logo', apiKeyAuth, upload.single('logo'), async (req, res) => {
     store.logo = `/uploads/${req.file.filename}`;
     await writeJSON('store', store);
     console.log('[UPLOAD LOGO] Success');
-    res.json(store);
+    res.json({ status: true, data: store });
   } catch (error) {
     console.error('[UPLOAD LOGO ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 
@@ -347,10 +374,70 @@ app.get('/logs', apiKeyAuth, async (req, res) => {
   console.log('[GET LOGS] Request received');
   try {
     const logs = await readJSON('logs');
-    res.json(logs);
+    res.json({ status: true, data: logs });
   } catch (error) {
     console.error('[GET LOGS ERROR]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
+app.get('/reports/monthly-sales', apiKeyAuth, async (req, res) => {
+  console.log('[REPORT MONTHLY SALES] Request received');
+  try {
+    const files = await fs.readdir(dataPath);
+    const salesFiles = files.filter(f => f.startsWith('sales-') && f.endsWith('.json'));
+    console.log(`[REPORT MONTHLY SALES] Found ${salesFiles.length} sales files`);
+
+    const monthlySales = [];
+    for (const file of salesFiles) {
+      const match = file.match(/sales-(\d{4})-(\d{1,2})\.json/);
+      if (!match) continue;
+
+      const year = parseInt(match[1]);
+      const month = parseInt(match[2]);
+      const sales = await readJSON(path.parse(file).name);
+      const total = sales.reduce((sum, sale) => sum + sale.total, 0);
+
+      monthlySales.push({ year, month, total });
+    }
+
+    monthlySales.sort((a, b) => a.year - b.year || a.month - b.month);
+    res.json({ status: true, data: monthlySales });
+  } catch (error) {
+    console.error('[REPORT MONTHLY SALES ERROR]', error);
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
+// Endpoint untuk mengunduh laporan penjualan
+app.get('/reports/download', apiKeyAuth, async (req, res) => {
+  console.log('[DOWNLOAD REPORT] Request received');
+  try {
+    const files = await fs.readdir(dataPath);
+    const salesFiles = files.filter(f => f.startsWith('sales-') && f.endsWith('.json'));
+    console.log(`[DOWNLOAD REPORT] Found ${salesFiles.length} sales files`);
+
+    const allSales = [];
+    for(const file of salesFiles) {
+      const sales = await readJSON(path.parse(file).name);
+      allSales.push(...sales);
+    }
+
+    const csvData = allSales.map(sale => {
+      return sale.items.map(item => {
+        return `${sale.timestamp},${sale.buyer},${item.name},${item.qty},${item.price},${item.total}`;
+      }).join('\n');
+    }).join('\n');
+
+    const csvHeader = 'Timestamp,Buyer,Item Name,Quantity,Price,Total\n';
+    const csv = csvHeader + csvData;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=sales-report.csv');
+    res.send(csv);
+  } catch (error) {
+    console.error('[DOWNLOAD REPORT ERROR]', error);
+    res.status(500).json({ status: false, error: error.message });
   }
 });
 

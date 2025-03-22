@@ -381,6 +381,34 @@ app.get('/logs', apiKeyAuth, async (req, res) => {
   }
 });
 
+app.get('/reports/monthly-sales', apiKeyAuth, async (req, res) => {
+  console.log('[REPORT MONTHLY SALES] Request received');
+  try {
+    const files = await fs.readdir(dataPath);
+    const salesFiles = files.filter(f => f.startsWith('sales-') && f.endsWith('.json'));
+    console.log(`[REPORT MONTHLY SALES] Found ${salesFiles.length} sales files`);
+
+    const monthlySales = [];
+    for (const file of salesFiles) {
+      const match = file.match(/sales-(\d{4})-(\d{1,2})\.json/);
+      if (!match) continue;
+
+      const year = parseInt(match[1]);
+      const month = parseInt(match[2]);
+      const sales = await readJSON(path.parse(file).name);
+      const total = sales.reduce((sum, sale) => sum + sale.total, 0);
+
+      monthlySales.push({ year, month, total });
+    }
+
+    monthlySales.sort((a, b) => a.year - b.year || a.month - b.month);
+    res.json({ status: true, data: monthlySales });
+  } catch (error) {
+    console.error('[REPORT MONTHLY SALES ERROR]', error);
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
 // Endpoint untuk mengunduh laporan penjualan
 app.get('/reports/download', apiKeyAuth, async (req, res) => {
   console.log('[DOWNLOAD REPORT] Request received');

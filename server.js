@@ -48,7 +48,7 @@ let adminSettings = readDB('settings');
 
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static('public')); // Untuk serve file static
+//app.use(express.static('public')); // Untuk serve file static
 
 // Middleware admin
 const isAdmin = (req, res, next) => {
@@ -62,7 +62,7 @@ const isAdmin = (req, res, next) => {
 
 // Route utama untuk serve HTML
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // CRUD Items

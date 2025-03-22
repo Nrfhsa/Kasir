@@ -3,50 +3,52 @@ const bodyParser = require('body-parser');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const fs = require('fs');
-const path = require('path'); // Tambahkan modul path
+const path = require('path');
 
 const app = express();
-const port = 9000;
+const port = 3000;
 
-// Setup direktori dan file database
+// Setup direktori database
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir);
 }
 
-const paths = {
+// Path file JSON
+const dbPaths = {
   items: path.join(dataDir, 'items.json'),
   sales: path.join(dataDir, 'sales.json'),
   settings: path.join(dataDir, 'settings.json')
 };
 
-// Fungsi bantu untuk baca/tulis file
-const readJSON = (file) => {
+// Fungsi bantu database
+const readDB = (type) => {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (e) {
-    if (e.code === 'ENOENT') {
-      fs.writeFileSync(file, JSON.stringify(file.includes('items') ? {} : []));
-      return file.includes('items') ? {} : [];
+    const data = fs.readFileSync(dbPaths[type], 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      // Buat file kosong jika tidak ditemukan
+      const defaultValue = type === 'items' ? {} : type === 'sales' ? [] : { tax: 0.1 };
+      writeDB(type, defaultValue);
+      return defaultValue;
     }
-    throw e;
+    throw error;
   }
 };
 
-const writeJSON = (file, data) => {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+const writeDB = (type, data) => {
+  fs.writeFileSync(dbPaths[type], JSON.stringify(data, null, 2));
 };
 
 // Inisialisasi database
-let items = readJSON(paths.items);
-let sales = readJSON(paths.sales);
-let adminSettings = Object.assign(
-  { tax: 0.1 },
-  readJSON(paths.settings)
-);
+let items = readDB('items');
+let sales = readDB('sales');
+let adminSettings = readDB('settings');
 
 app.use(cors());
 app.use(bodyParser.json());
+app.use(express.static('public')); // Untuk serve file static
 
 // Middleware admin
 const isAdmin = (req, res, next) => {
@@ -58,9 +60,9 @@ const isAdmin = (req, res, next) => {
   }
 };
 
-// Perbaikan route untuk serve file HTML
+// Route utama untuk serve HTML
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // CRUD Items
@@ -68,7 +70,7 @@ app.post('/items', isAdmin, (req, res) => {
   const { name, price, stock } = req.body;
   const id = uuidv4();
   items[id] = { id, name, price, stock: stock || 0 };
-  writeJSON(paths.items, items);
+  writeDB('items', items);
   res.json(items[id]);
 });
 
@@ -76,7 +78,7 @@ app.delete('/items/:id', isAdmin, (req, res) => {
   const { id } = req.params;
   if (!items[id]) return res.status(404).json({ error: 'Barang tidak ditemukan' });
   delete items[id];
-  writeJSON(paths.items, items);
+  writeDB('items', items);
   res.json({ message: 'Barang berhasil dihapus' });
 });
 
@@ -85,7 +87,7 @@ app.put('/items/:id/price', isAdmin, (req, res) => {
   const { price } = req.body;
   if (!items[id]) return res.status(404).json({ error: 'Barang tidak ditemukan' });
   items[id].price = price;
-  writeJSON(paths.items, items);
+  writeDB('items', items);
   res.json(items[id]);
 });
 
@@ -100,32 +102,60 @@ app.get('/sales', (req, res) => {
   res.json(filteredSales);
 });
 
-// Sistem stok
+// Sistem Stok
 app.get('/stock', (req, res) => {
-  res.json(Object.values(items).map(({ id, name, stock }) => ({ id, name, stock })));
+  const stockList = Object.values(items).map(({ id, name, stock }) => ({ id, name, stock }));
+  res.json(stockList);
 });
 
-// Transaksi baru
+// Barang Populer
+app.get('/popular', (req, res) => {
+  const popularity = {};
+  sales.forEach(sale => {
+    sale.items.forEach(item => {
+      popularity[item.id] = (popularity[item.id] || 0) + item.quantity;
+    });
+  });
+
+  const popularItems = Object.entries(popularity)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([id, count]) => ({
+      item: items[id],
+      totalSold: count
+    }));
+
+  res.json(popularItems);
+});
+
+// Transaksi Baru
 app.post('/sales', (req, res) => {
   const { buyerName, items: saleItems } = req.body;
   const timestamp = new Date();
 
   // Validasi stok
   for (const item of saleItems) {
-    if (!items[item.id] || items[item.id].stock < item.quantity) {
-      return res.status(400).json({ error: `Stok ${item.name} tidak cukup` });
+    const dbItem = items[item.id];
+    if (!dbItem || dbItem.stock < item.quantity) {
+      return res.status(400).json({ 
+        error: `Stok ${dbItem?.name || 'unknown'} tidak cukup` 
+      });
     }
   }
 
-  // Update stok dan catat penjualan
+  // Update stok
   saleItems.forEach(item => {
     items[item.id].stock -= item.quantity;
   });
-  writeJSON(paths.items, items);
+  writeDB('items', items);
 
-  const total = saleItems.reduce((sum, item) => sum + (items[item.id].price * item.quantity), 0);
-  
-  const sale = {
+  // Hitung total
+  const total = saleItems.reduce((sum, item) => {
+    return sum + (items[item.id].price * item.quantity);
+  }, 0);
+
+  // Tambah penjualan
+  const newSale = {
     id: uuidv4(),
     buyerName,
     items: saleItems,
@@ -133,41 +163,45 @@ app.post('/sales', (req, res) => {
     timestamp,
   };
 
-  sales.push(sale);
-  writeJSON(paths.sales, sales);
-  res.json(sale);
+  sales.push(newSale);
+  writeDB('sales', sales);
+  res.json(newSale);
 });
 
-// ... (tetap pertahankan route lainnya yang tidak disebutkan)
-
-app.listen(port, () => {
-  console.log(`Server berjalan di http://localhost:${port}`);
-});
-// Top pembeli
+// Top Pembeli
 app.get('/top-buyers', (req, res) => {
   const buyers = {};
   sales.forEach(sale => {
     buyers[sale.buyerName] = (buyers[sale.buyerName] || 0) + sale.total;
   });
-  
+
   const topBuyers = Object.entries(buyers)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([name, total]) => ({ name, total }));
-  
+
   res.json(topBuyers);
 });
 
-// Menu admin
+// Menu Admin
 app.get('/admin', isAdmin, (req, res) => {
-  res.json({
+  const adminReport = {
     totalItems: Object.keys(items).length,
     totalSales: sales.length,
     totalRevenue: sales.reduce((sum, sale) => sum + sale.total, 0),
     settings: adminSettings
-  });
+  };
+  res.json(adminReport);
+});
+
+// Update Settings Admin
+app.put('/admin/settings', isAdmin, (req, res) => {
+  adminSettings = { ...adminSettings, ...req.body };
+  writeDB('settings', adminSettings);
+  res.json(adminSettings);
 });
 
 app.listen(port, () => {
   console.log(`Server berjalan di http://localhost:${port}`);
+  console.log(`File database disimpan di: ${dataDir}`);
 });

@@ -6,6 +6,9 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const port = 3000;
 
+app.set('trust proxy', 1);
+app.set('json spaces', 2);
+
 // Konfigurasi
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, 'uploads/'),
@@ -51,6 +54,10 @@ const logAction = async (user, action) => {
   });
   await writeJSON('logs', logs);
 };
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // Manajemen Barang
 app.post('/items', apiKeyAuth, async (req, res) => {

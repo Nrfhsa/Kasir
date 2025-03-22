@@ -109,9 +109,10 @@ app.post('/items', apiKeyAuth, async (req, res) => {
   console.log('[CREATE ITEM] Request body:', req.body);
   try {
     const items = await readJSON('items');
-    const existing = items.find(i => i.name === req.body.name);
+    const itemName = req.body.name.trim().toLowerCase();
+    const existing = items.find(i => i.name.trim().toLowerCase() === itemName);
 
-    if(existing) {
+    if (existing) {
       console.log(`[CREATE ITEM] Updating stock for: ${existing.name}`);
       existing.stock += parseInt(req.body.stock) || 0;
       await logAction(req.user, `Stock updated for ${existing.name}`);
@@ -119,6 +120,7 @@ app.post('/items', apiKeyAuth, async (req, res) => {
       const newItem = {
         id: generateID(),
         ...req.body,
+        name: req.body.name.trim(),
         photo: null,
         discount: 0,
         stock: parseInt(req.body.stock) || 0
@@ -142,9 +144,25 @@ app.put('/items/:id', apiKeyAuth, async (req, res) => {
     const items = await readJSON('items');
     const item = items.find(i => i.id === req.params.id);
 
-    if(!item) {
+    if (!item) {
       console.log(`[UPDATE ITEM] Item not found: ${req.params.id}`);
       return res.status(404).json({ status: false, error: 'Item not found' });
+    }
+
+    if (req.body.name) {
+      const newName = req.body.name.trim().toLowerCase();
+      const existingItem = items.find(i => 
+        i.id !== req.params.id && 
+        i.name.trim().toLowerCase() === newName
+      );
+
+      if (existingItem) {
+        return res.status(400).json({ 
+          status: false, 
+          error: 'Item name already exists' 
+        });
+      }
+      req.body.name = req.body.name.trim();
     }
 
     Object.assign(item, req.body);
@@ -164,14 +182,14 @@ app.delete('/items/:id', apiKeyAuth, async (req, res) => {
     const initialLength = items.length;
     items = items.filter(i => i.id !== req.params.id);
 
-    if(items.length === initialLength) {
+    if (items.length === initialLength) {
       console.log(`[DELETE ITEM] Item not found: ${req.params.id}`);
       return res.status(404).json({ status: false, error: 'Item not found' });
     }
 
     await writeJSON('items', items);
     await logAction(req.user, `Item deleted: ${req.params.id}`);
-    res.status(204).send();
+    res.status(200).json({ status: true, message: 'Item deleted successfully' });
   } catch (error) {
     console.error('[DELETE ITEM ERROR]', error);
     res.status(500).json({ status: false, error: error.message });
@@ -271,18 +289,23 @@ app.get('/reports/popular', apiKeyAuth, async (req, res) => {
 
     const itemCounts = allSales.reduce((acc, sale) => {
       sale.items.forEach(item => {
-        acc[item.id] = (acc[item.id] || 0) + item.qty;
+        const nameKey = item.name.trim().toLowerCase();
+        acc[nameKey] = (acc[nameKey] || 0) + item.qty;
       });
       return acc;
     }, {});
 
+    const items = await readJSON('items');
     const popularItems = Object.entries(itemCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
-      .map(([id, qty]) => {
-        const item = allSales.find(sale => sale.items.find(i => i.id === id)).items.find(i => i.id === id);
-        return { id, name: item.name, quantity: qty };
-      });
+      .map(([nameKey, quantity]) => {
+        const item = items.find(i => 
+          i.name.trim().toLowerCase() === nameKey
+        );
+        return item ? { id: item.id, name: item.name, quantity } : null;
+      })
+      .filter(item => item !== null);
 
     res.json({ status: true, data: popularItems });
   } catch (error) {

@@ -21,7 +21,7 @@ app.use('/uploads', express.static('uploads'));
 
 // Helper functions
 const dataPath = path.join(__dirname, 'data');
-const readJSON = async (file) => JSON.parse(await fs.readFile(path.join(dataPath, `${file}.json`), 'utf8').catch(() => []);
+const readJSON = async (file) => JSON.parse(await fs.readFile(path.join(dataPath, `${file}.json`), 'utf8').catch(() => []));
 const writeJSON = async (file, data) => await fs.writeFile(path.join(dataPath, `${file}.json`), JSON.stringify(data, null, 2));
 
 // Middleware API Key

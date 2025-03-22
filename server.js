@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path'); // Tambahkan modul path
 
 const app = express();
-const port = 8080;
+const port = 9000;
 
 // Setup direktori dan file database
 const dataDir = path.join(__dirname, 'data');

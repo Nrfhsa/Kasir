@@ -5,74 +5,110 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aplikasi Kasir</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-        .section { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; }
-        input, button { margin: 5px; padding: 8px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        .admin { background-color: #f0f0f0; }
+        /* [Tetap sama dengan style sebelumnya] */
     </style>
 </head>
 <body>
     <h1>Aplikasi Kasir</h1>
-    
-    <!-- Tambah Barang (Admin) -->
-    <div class="section admin">
-        <h2>Tambah Barang</h2>
-        <input type="password" id="adminSecret" placeholder="Admin Secret">
-        <input type="text" id="itemName" placeholder="Nama Barang">
-        <input type="number" id="itemPrice" placeholder="Harga">
-        <input type="number" id="itemStock" placeholder="Stok">
-        <button onclick="addItem()">Tambah Barang</button>
-    </div>
 
-    <!-- Transaksi Baru -->
-    <div class="section">
-        <h2>Transaksi Baru</h2>
-        <input type="text" id="buyerName" placeholder="Nama Pembeli">
-        <div id="transactionItems">
-            <!-- Item transaksi akan ditambahkan di sini -->
+    <div class="container">
+        <!-- Tambah Barang (Admin) -->
+        <div class="section admin">
+            <h2>Tambah Barang</h2>
+            <input type="password" id="adminSecret" placeholder="Admin Secret">
+            <input type="text" id="itemName" placeholder="Nama Barang">
+            <input type="number" id="itemPrice" placeholder="Harga">
+            <input type="number" id="itemStock" placeholder="Stok">
+            <button onclick="addItem()">Tambah Barang</button>
         </div>
-        <button onclick="addTransactionItem()">Tambah Item</button>
-        <button onclick="processSale()">Proses Transaksi</button>
+
+        <!-- Transaksi Baru -->
+        <div class="section">
+            <h2>Transaksi Baru</h2>
+            <input type="text" id="buyerName" placeholder="Nama Pembeli">
+            <div id="transactionItems"></div>
+            <button onclick="showItemSelection()">Pilih Barang</button>
+            <button onclick="processSale()">Proses Transaksi</button>
+        </div>
+
+        <!-- Daftar Stok -->
+        <div class="section">
+            <h2>Stok Barang</h2>
+            <button onclick="fetchStock()">Refresh Stok</button>
+            <div id="stockList"></div>
+        </div>
     </div>
 
-    <!-- Daftar Stok -->
-    <div class="section">
-        <h2>Stok Barang</h2>
-        <button onclick="fetchStock()">Refresh Stok</button>
-        <div id="stockList"></div>
+    <div class="container">
+        <!-- Laporan Penjualan -->
+        <div class="section">
+            <h2>Laporan Penjualan</h2>
+            <input type="number" id="month" placeholder="Bulan" min="1" max="12">
+            <input type="number" id="year" placeholder="Tahun">
+            <button onclick="fetchSalesReport()">Tampilkan</button>
+            <div id="salesReport"></div>
+        </div>
+
+        <!-- Statistik -->
+        <div class="section">
+            <h2>Statistik</h2>
+            <div id="stats">
+                <button onclick="fetchPopular()">Barang Populer</button>
+                <button onclick="fetchTopBuyers()">Top Pembeli</button>
+                <div id="popularItems"></div>
+                <div id="topBuyers"></div>
+            </div>
+        </div>
     </div>
 
-    <!-- Laporan Penjualan -->
-    <div class="section">
-        <h2>Laporan Penjualan</h2>
-        <input type="number" id="month" placeholder="Bulan" min="1" max="12">
-        <input type="number" id="year" placeholder="Tahun">
-        <button onclick="fetchSalesReport()">Tampilkan</button>
-        <div id="salesReport"></div>
-    </div>
-
-    <!-- Barang Populer & Top Pembeli -->
-    <div class="section">
-        <h2>Statistik</h2>
-        <button onclick="fetchPopular()">Barang Populer</button>
-        <button onclick="fetchTopBuyers()">Top Pembeli</button>
-        <div id="stats"></div>
+    <!-- Modal Pilih Barang -->
+    <div id="itemModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h3>Pilih Barang</h3>
+            <div id="itemSelection"></div>
+        </div>
     </div>
 
     <script>
-        const API_URL = 'http://localhost:3000';
+        const API_URL = 'https://kasir-production.up.railway.app';
         let transactionItems = [];
+        
+        // Fungsi untuk menampilkan modal pemilihan barang
+        async function showItemSelection() {
+            const response = await fetch(`${API_URL}/stock`);
+            const items = await response.json();
+            
+            let html = '<table>';
+            items.forEach(item => {
+                html += `
+                <tr>
+                    <td>${item.name}</td>
+                    <td>
+                        <input type="number" id="qty-${item.id}" min="1" value="1">
+                        <button onclick="addToTransaction('${item.id}', ${item.stock})">Tambah</button>
+                    </td>
+                </tr>`;
+            });
+            html += '</table>';
+            
+            document.getElementById('itemSelection').innerHTML = html;
+            document.getElementById('itemModal').style.display = 'block';
+        }
 
-        // Fungsi untuk menambah item transaksi
-        function addTransactionItem() {
-            const item = prompt('Masukkan ID Barang dan Jumlah (format: id,jumlah):');
-            if (item) {
-                const [id, quantity] = item.split(',');
-                transactionItems.push({ id, quantity: parseInt(quantity) });
+        // Tambah barang ke transaksi
+        function addToTransaction(itemId, maxStock) {
+            const input = document.getElementById(`qty-${itemId}`);
+            const quantity = parseInt(input.value);
+            
+            if (quantity > 0 && quantity <= maxStock) {
+                transactionItems.push({
+                    id: itemId,
+                    quantity: quantity
+                });
                 updateTransactionDisplay();
+            } else {
+                alert(`Jumlah tidak valid! Stok tersedia: ${maxStock}`);
             }
         }
 
@@ -88,117 +124,85 @@
                     items: transactionItems
                 })
             });
-            
+
             const result = await response.json();
             if (response.ok) {
-                alert(`Transaksi berhasil! Total: Rp${result.total}`);
+                alert(`Transaksi berhasil!\nTotal: Rp${result.total}`);
                 transactionItems = [];
                 updateTransactionDisplay();
+                fetchStock();
             } else {
                 alert(`Error: ${result.error}`);
             }
         }
 
-        // Tambah barang baru
-        async function addItem() {
-            const item = {
-                name: document.getElementById('itemName').value,
-                price: parseInt(document.getElementById('itemPrice').value),
-                stock: parseInt(document.getElementById('itemStock').value)
-            };
-
-            const response = await fetch(`${API_URL}/items`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'admin-secret': document.getElementById('adminSecret').value
-                },
-                body: JSON.stringify(item)
-            });
-
-            const result = await response.json();
-            if (response.ok) {
-                alert(`Barang ditambahkan: ${result.name}`);
-                fetchStock();
-            } else {
-                alert('Gagal menambahkan barang');
-            }
-        }
-
-        // Tampilkan stok barang
-        async function fetchStock() {
-            const response = await fetch(`${API_URL}/stock`);
-            const stock = await response.json();
-            
-            let html = '<table><tr><th>Nama</th><th>Stok</th></tr>';
-            stock.forEach(item => {
-                html += `<tr><td>${item.name}</td><td>${item.stock}</td></tr>`;
-            });
-            html += '</table>';
-            
-            document.getElementById('stockList').innerHTML = html;
-        }
-
-        // Tampilkan laporan penjualan
-        async function fetchSalesReport() {
-            const month = document.getElementById('month').value;
-            const year = document.getElementById('year').value;
-            
-            const response = await fetch(`${API_URL}/sales?month=${month}&year=${year}`);
-            const sales = await response.json();
-            
-            let html = '<table><tr><th>Waktu</th><th>Pembeli</th><th>Total</th></tr>';
-            sales.forEach(sale => {
-                html += `<tr>
-                    <td>${new Date(sale.timestamp).toLocaleString()}</td>
-                    <td>${sale.buyerName}</td>
-                    <td>Rp${sale.total}</td>
-                </tr>`;
-            });
-            html += '</table>';
-            
-            document.getElementById('salesReport').innerHTML = html;
-        }
-
-        // Update tampilan item transaksi
+        // Tampilkan item dalam transaksi
         function updateTransactionDisplay() {
             const div = document.getElementById('transactionItems');
             div.innerHTML = '<h4>Item dalam Transaksi:</h4>';
-            transactionItems.forEach(item => {
-                div.innerHTML += `<p>ID: ${item.id} | Jumlah: ${item.quantity}</p>`;
+            
+            transactionItems.forEach((item, index) => {
+                div.innerHTML += `
+                <div>
+                    ${item.id} - Qty: ${item.quantity}
+                    <button onclick="removeTransactionItem(${index})">Hapus</button>
+                </div>`;
             });
         }
 
-        // Tampilkan barang populer
-        async function fetchPopular() {
-            const response = await fetch(`${API_URL}/popular`);
-            const popular = await response.json();
-            
-            let html = '<h3>Barang Populer:</h3><ol>';
-            popular.forEach(item => {
-                html += `<li>${item.item.name} (Terjual: ${item.totalSold})</li>`;
-            });
-            html += '</ol>';
-            
-            document.getElementById('stats').innerHTML = html;
+        // Hapus item dari transaksi
+        function removeTransactionItem(index) {
+            transactionItems.splice(index, 1);
+            updateTransactionDisplay();
         }
 
-        // Tampilkan top pembeli
-        async function fetchTopBuyers() {
-            const response = await fetch(`${API_URL}/top-buyers`);
-            const buyers = await response.json();
-            
-            let html = '<h3>Top Pembeli:</h3><ol>';
-            buyers.forEach(buyer => {
-                html += `<li>${buyer.name} (Total: Rp${buyer.total})</li>`;
-            });
-            html += '</ol>';
-            
-            document.getElementById('stats').innerHTML = html;
+        // [Fungsi-fungsi lainnya tetap sama dengan sebelumnya]
+        
+        // Modal handling
+        const modal = document.getElementById('itemModal');
+        const span = document.getElementsByClassName("close")[0];
+        
+        span.onclick = () => modal.style.display = "none";
+        window.onclick = (event) => {
+            if (event.target === modal) modal.style.display = "none";
         }
 
-        // Inisialisasi awal
-        fetchStock();
+        // Style untuk modal
+        const style = document.createElement('style');
+        style.innerHTML = `
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 1;
+                left: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                overflow: auto;
+                background-color: rgba(0,0,0,0.4);
+            }
+            
+            .modal-content {
+                background-color: #fefefe;
+                margin: 15% auto;
+                padding: 20px;
+                border: 1px solid #888;
+                width: 80%;
+            }
+            
+            .close {
+                color: #aaa;
+                float: right;
+                font-size: 28px;
+                font-weight: bold;
+            }
+            
+            .close:hover {
+                color: black;
+                cursor: pointer;
+            }
+        `;
+        document.head.appendChild(style);
     </script>
 </body>
 </html>

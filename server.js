@@ -301,8 +301,24 @@ app.put('/items/:id', apiKeyAuth, async (req, res) => {
       return res.status(404).json({ status: false, error: 'Item not found' });
     }
 
-    if (req.body.name) {
-      const newName = req.body.name.trim().toLowerCase();
+    // Filter update data untuk menghindari nilai kosong
+    const updateData = {};
+    for (const [key, value] of Object.entries(req.body)) {
+      if (value !== undefined && value !== null) {
+        if (typeof value === 'string') {
+          const trimmedValue = value.trim();
+          if (trimmedValue !== '') {
+            updateData[key] = trimmedValue;
+          }
+        } else {
+          updateData[key] = value;
+        }
+      }
+    }
+
+    // Validasi nama unik jika ada perubahan nama
+    if (updateData.name) {
+      const newName = updateData.name.trim().toLowerCase();
       const existingItem = items.find(i => 
         i.id !== req.params.id && 
         i.name.trim().toLowerCase() === newName
@@ -314,10 +330,10 @@ app.put('/items/:id', apiKeyAuth, async (req, res) => {
           error: 'Item name already exists' 
         });
       }
-      req.body.name = req.body.name.trim();
     }
 
-    Object.assign(item, req.body);
+    // Update item hanya dengan data yang valid
+    Object.assign(item, updateData);
     await writeJSON('items', items);
     await logAction(req.user, `Item updated: ${item.name}`);
     res.json({ status: true, data: item });
@@ -326,7 +342,6 @@ app.put('/items/:id', apiKeyAuth, async (req, res) => {
     res.status(500).json({ status: false, error: error.message });
   }
 });
-
 app.delete('/items/:id', apiKeyAuth, async (req, res) => {
   console.log(`[DELETE ITEM] ID: ${req.params.id}`);
   try {
@@ -364,13 +379,11 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
     const date = moment();
     const salesFile = `sales-${date.format('YYYY-MM')}`;
 
-    // Baca atau inisialisasi data penjualan
     let sales = await readJSON(salesFile);
     if (!Array.isArray(sales)) {
       sales = [];
     }
 
-    // Proses transaksi
     const store = await readJSON('store');
     const purchaseId = await generatePurchaseID();
 
@@ -387,7 +400,6 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
 
     const allItems = await readJSON('items');
 
-    // Proses setiap item
     for (const item of saleItems) {
       const product = allItems.find(p => p.id === item.id);
       if (!product) {
@@ -399,20 +411,23 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
       }
 
       product.stock -= item.qty;
-      const price = product.price * (1 - (product.discount/100));
+      const originalPrice = product.price;
+      const discount = product.discount || 0;
+      const discountedPrice = originalPrice * (1 - discount / 100);
+      const itemTotal = item.qty * discountedPrice;
 
       sale.items.push({
         id: item.id,
         name: product.name,
         qty: item.qty,
-        price,
-        total: item.qty * price
+        price: originalPrice,    // Harga asli
+        discount: discount,      // Persentase diskon
+        total: itemTotal         // Harga setelah diskon
       });
 
-      sale.total += item.qty * price;
+      sale.total += itemTotal;
     }
 
-    // Validasi pembayaran
     if (sale.paymentAmount < sale.total) {
       return res.status(400).json({ 
         status: false, 
@@ -422,16 +437,12 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
 
     sale.change = sale.paymentAmount - sale.total;
 
-    // Simpan data
-    sales.push(sale);
     await Promise.all([
       writeJSON('items', allItems),
       writeJSON(salesFile, sales)
     ]);
 
-    // Buat laporan
     await createDailyReport(sale);
-
     await logAction(req.user, `New sale: ${sale.id}`);
     res.status(201).json({ status: true, data: sale });
   } catch (error) {
@@ -439,6 +450,7 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
     res.status(500).json({ status: false, error: error.message });
   }
 });
+
 // Route untuk mendapatkan stok barang (diurutkan berdasarkan stok paling sedikit)
 app.get('/stock', apiKeyAuth, async (req, res) => {
   console.log('[GET STOCK] Request received');

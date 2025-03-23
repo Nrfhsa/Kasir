@@ -2,9 +2,12 @@ const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const multer = require('multer');
-const { v4: uuidv4 } = require('uuid');
+const moment = require('moment-timezone');
 const app = express();
 const port = 3000;
+
+// Set zona waktu ke Asia/Jakarta
+moment.tz.setDefault('Asia/Jakarta');
 
 app.set('trust proxy', 1);
 app.set('json spaces', 2);
@@ -21,17 +24,18 @@ app.use('/uploads', express.static('uploads'));
 
 // Helper functions
 const dataPath = path.join(__dirname, 'data');
-const readJSON = async (file) => {
+const readJSON = async (file, defaultValue = []) => {
   try {
     const data = await fs.readFile(path.join(dataPath, `${file}.json`), 'utf8');
     return JSON.parse(data);
   } catch (error) {
-    if (error.code === 'ENOENT') return [];
+    if (error.code === 'ENOENT') return defaultValue;
     throw error;
   }
 };
 
 const writeJSON = async (file, data) => {
+  await fs.mkdir(path.dirname(path.join(dataPath, `${file}.json`)), { recursive: true });
   await fs.writeFile(path.join(dataPath, `${file}.json`), JSON.stringify(data, null, 2));
 };
 
@@ -63,11 +67,32 @@ const apiKeyAuth = async (req, res, next) => {
   }
 };
 
-// Generate ID
-const generateID = () => {
-  const id = Math.random().toString(36).substr(2, 6).toUpperCase();
-  console.log(`[GENERATE ID] New ID: ${id}`);
-  return id;
+// Generate ID Pembelian berdasarkan format yang diminta
+const generatePurchaseID = async () => {
+  const now = moment();
+  const formattedDate = now.format('DDMMYY');
+
+  // Dapatkan tanggal hari ini dalam format YYYY-MM-DD untuk nama file laporan
+  const today = now.format('YYYY-MM-DD');
+  const dailyReportFile = `reports/daily/${today}`;
+
+  try {
+    // Baca laporan harian untuk menentukan nomor urut pembeli
+    const dailyReport = await readJSON(dailyReportFile);
+    // Jika sudah ada transaksi hari ini, ambil jumlah transaksi + 1, jika belum, mulai dari 1
+    const orderNumber = dailyReport.transactions ? dailyReport.transactions.length + 1 : 1;
+
+    // Format nomor urut dengan padding 3 digit
+    const formattedOrderNumber = orderNumber.toString().padStart(3, '0');
+
+    const purchaseID = `${formattedDate}${formattedOrderNumber}`;
+    console.log(`[GENERATE PURCHASE ID] New ID: ${purchaseID}`);
+    return purchaseID;
+  } catch (error) {
+    // Jika file laporan belum ada, berarti ini transaksi pertama hari ini
+    console.log(`[GENERATE PURCHASE ID] First transaction of the day`);
+    return `${formattedDate}001`;
+  }
 };
 
 // Logging
@@ -76,13 +101,139 @@ const logAction = async (user, action) => {
   try {
     const logs = await readJSON('logs');
     logs.push({ 
-      timestamp: new Date().toISOString(),
+      timestamp: moment().format(),
       user,
       action 
     });
     await writeJSON('logs', logs);
   } catch (error) {
     console.error('[LOG ACTION ERROR]', error);
+  }
+};
+
+// Membuat laporan harian
+const createDailyReport = async (transaction) => {
+  const now = moment();
+  const today = now.format('YYYY-MM-DD');
+  const dailyReportFile = `reports/daily/${today}`;
+
+  try {
+    // Baca laporan atau inisialisasi baru
+    let dailyReport = await readJSON(dailyReportFile);
+
+    // Handle jika file tidak ada atau format lama
+    if (!dailyReport || Array.isArray(dailyReport)) {
+      dailyReport = {
+        date: today,
+        totalRevenue: 0,
+        transactionCount: 0,
+        transactions: []
+      };
+    }
+
+    // Pastikan transactions ada
+    if (!dailyReport.transactions) {
+      dailyReport.transactions = [];
+    }
+
+    // Tambahkan transaksi baru
+    dailyReport.transactions.push(transaction);
+
+    // Update total
+    dailyReport.totalRevenue = dailyReport.transactions.reduce((sum, t) => sum + t.total, 0);
+    dailyReport.transactionCount = dailyReport.transactions.length;
+
+    // Simpan laporan
+    await writeJSON(dailyReportFile, dailyReport);
+    console.log(`[DAILY REPORT] Updated for ${today}`);
+
+    // Update laporan bulanan
+    await updateMonthlyReport(transaction);
+
+    return dailyReport;
+  } catch (error) {
+    console.error('[DAILY REPORT ERROR]', error);
+    throw error;
+  }
+};
+
+// Update laporan bulanan
+const updateMonthlyReport = async (transaction) => {
+  const now = moment();
+  const yearMonth = now.format('YYYY-MM');
+  const monthlyReportFile = `reports/monthly/${yearMonth}`;
+
+  try {
+    // Baca laporan yang sudah ada atau buat baru jika belum ada
+    let monthlyReport = await readJSON(monthlyReportFile);
+
+    // Jika laporan kosong, inisialisasi
+    if (!Array.isArray(monthlyReport) && !monthlyReport.transactions) {
+      monthlyReport = {
+        yearMonth,
+        totalRevenue: 0,
+        transactionCount: 0,
+        topCustomers: [],
+        popularItems: {},
+        transactions: [] // Pastikan transactions diinisialisasi sebagai array
+      };
+    }
+
+    // Pastikan transactions ada
+    if (!monthlyReport.transactions) {
+      monthlyReport.transactions = [];
+    }
+
+    // Tambahkan transaksi baru
+    monthlyReport.transactions.push(transaction);
+
+    // Update total pendapatan dan jumlah transaksi
+    monthlyReport.totalRevenue = monthlyReport.transactions.reduce((sum, t) => sum + t.total, 0);
+    monthlyReport.transactionCount = monthlyReport.transactions.length;
+
+    // Update data pelanggan
+    const customerSpending = {};
+    for (const t of monthlyReport.transactions) {
+      if (!customerSpending[t.buyer]) {
+        customerSpending[t.buyer] = 0;
+      }
+      customerSpending[t.buyer] += t.total;
+    }
+
+    // Sortir pelanggan berdasarkan total belanja
+    monthlyReport.topCustomers = Object.entries(customerSpending)
+      .map(([customer, total]) => ({ customer, total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+
+    // Update data barang populer
+    const itemCounts = {};
+    for (const t of monthlyReport.transactions) {
+      for (const item of t.items) {
+        if (!itemCounts[item.id]) {
+          itemCounts[item.id] = {
+            id: item.id,
+            name: item.name,
+            quantity: 0
+          };
+        }
+        itemCounts[item.id].quantity += item.qty;
+      }
+    }
+
+    // Sortir barang berdasarkan jumlah terjual
+    monthlyReport.popularItems = Object.values(itemCounts)
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 10);
+
+    // Simpan laporan
+    await writeJSON(monthlyReportFile, monthlyReport);
+    console.log(`[MONTHLY REPORT] Updated for ${yearMonth}`);
+
+    return monthlyReport;
+  } catch (error) {
+    console.error('[MONTHLY REPORT ERROR]', error);
+    throw error;
   }
 };
 
@@ -118,9 +269,10 @@ app.post('/items', apiKeyAuth, async (req, res) => {
       await logAction(req.user, `Stock updated for ${existing.name}`);
     } else {
       const newItem = {
-        id: generateID(),
+        id: Math.random().toString(36).substr(2, 6).toUpperCase(),
         ...req.body,
         name: req.body.name.trim(),
+        category: req.body.category || 'Uncategorized', // Tambahkan kategori barang
         photo: null,
         discount: 0,
         stock: parseInt(req.body.stock) || 0
@@ -199,66 +351,122 @@ app.delete('/items/:id', apiKeyAuth, async (req, res) => {
 app.post('/sales', apiKeyAuth, async (req, res) => {
   console.log('[CREATE SALE] Request body:', req.body);
   try {
-    const { buyer, items: saleItems } = req.body;
+    const { buyer, items: saleItems, paymentAmount } = req.body;
 
-    if (!buyer || !saleItems || !Array.isArray(saleItems)) {
-      console.log('[CREATE SALE] Invalid request format');
-      return res.status(400).json({ status: false, error: 'Invalid request format' });
+    // Validasi input
+    if (!buyer || !saleItems || !Array.isArray(saleItems) || paymentAmount === undefined) {
+      return res.status(400).json({ 
+        status: false, 
+        error: 'Invalid request format. Buyer, items, and paymentAmount are required.' 
+      });
     }
 
-    const date = new Date();
-    const salesFile = `sales-${date.getFullYear()}-${date.getMonth()+1}`;
-    console.log(`[CREATE SALE] Using sales file: ${salesFile}`);
+    const date = moment();
+    const salesFile = `sales-${date.format('YYYY-MM')}`;
 
+    // Baca atau inisialisasi data penjualan
+    let sales = await readJSON(salesFile);
+    if (!Array.isArray(sales)) {
+      sales = [];
+    }
+
+    // Proses transaksi
     const store = await readJSON('store');
+    const purchaseId = await generatePurchaseID();
+
     const sale = {
-      id: uuidv4(),
-      timestamp: date.toISOString(),
+      id: purchaseId,
+      timestamp: date.format(),
       cashier: store.cashier || 'Unknown',
       buyer,
       items: [],
-      total: 0
+      total: 0,
+      paymentAmount: parseFloat(paymentAmount),
+      change: 0
     };
 
     const allItems = await readJSON('items');
-    for (const item of saleItems) {
-      console.log(`[CREATE SALE] Processing item: ${item.id}`);
-      const product = allItems.find(p => p.id === item.id);
 
+    // Proses setiap item
+    for (const item of saleItems) {
+      const product = allItems.find(p => p.id === item.id);
       if (!product) {
-        console.log(`[CREATE SALE] Item not found: ${item.id}`);
         return res.status(400).json({ status: false, error: `Item ${item.id} not found` });
       }
 
       if (product.stock < item.qty) {
-        console.log(`[CREATE SALE] Insufficient stock for: ${product.name}`);
         return res.status(400).json({ status: false, error: `Insufficient stock for ${product.name}` });
       }
 
       product.stock -= item.qty;
       const price = product.price * (1 - (product.discount/100));
+
       sale.items.push({
-        ...item,
+        id: item.id,
         name: product.name,
+        qty: item.qty,
         price,
         total: item.qty * price
       });
+
       sale.total += item.qty * price;
     }
 
-    const sales = await readJSON(salesFile);
-    sales.push(sale);
+    // Validasi pembayaran
+    if (sale.paymentAmount < sale.total) {
+      return res.status(400).json({ 
+        status: false, 
+        error: `Insufficient payment. Total: ${sale.total}, Received: ${sale.paymentAmount}` 
+      });
+    }
 
+    sale.change = sale.paymentAmount - sale.total;
+
+    // Simpan data
+    sales.push(sale);
     await Promise.all([
       writeJSON('items', allItems),
       writeJSON(salesFile, sales)
     ]);
 
+    // Buat laporan
+    await createDailyReport(sale);
+
     await logAction(req.user, `New sale: ${sale.id}`);
-    console.log(`[CREATE SALE] Success: ${sale.id}`);
     res.status(201).json({ status: true, data: sale });
   } catch (error) {
     console.error('[CREATE SALE ERROR]', error);
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+// Route untuk mendapatkan stok barang (diurutkan berdasarkan stok paling sedikit)
+app.get('/stock', apiKeyAuth, async (req, res) => {
+  console.log('[GET STOCK] Request received');
+  try {
+    const items = await readJSON('items');
+    // Urutkan barang berdasarkan stok paling sedikit
+    const sortedItems = items.sort((a, b) => a.stock - b.stock);
+    res.json({ status: true, data: sortedItems });
+  } catch (error) {
+    console.error('[GET STOCK ERROR]', error);
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
+// Route untuk mendapatkan stok barang berdasarkan kategori
+app.get('/stock/category/:category', apiKeyAuth, async (req, res) => {
+  const category = req.params.category;
+  console.log(`[GET STOCK BY CATEGORY] Category: ${category}`);
+  try {
+    const items = await readJSON('items');
+    // Filter barang berdasarkan kategori dan urutkan berdasarkan stok paling sedikit
+    const filteredItems = items
+      .filter(item => item.category && item.category.toLowerCase() === category.toLowerCase())
+      .sort((a, b) => a.stock - b.stock);
+
+    res.json({ status: true, data: filteredItems });
+  } catch (error) {
+    console.error('[GET STOCK BY CATEGORY ERROR]', error);
     res.status(500).json({ status: false, error: error.message });
   }
 });
@@ -267,7 +475,9 @@ app.get('/reports/stock', apiKeyAuth, async (req, res) => {
   console.log('[REPORT STOCK] Request received');
   try {
     const items = await readJSON('items');
-    res.json({ status: true, data: items });
+    // Urutkan barang berdasarkan stok paling sedikit
+    const sortedItems = items.sort((a, b) => a.stock - b.stock);
+    res.json({ status: true, data: sortedItems });
   } catch (error) {
     console.error('[REPORT STOCK ERROR]', error);
     res.status(500).json({ status: false, error: error.message });
@@ -298,7 +508,7 @@ app.get('/reports/popular', apiKeyAuth, async (req, res) => {
     const items = await readJSON('items');
     const popularItems = Object.entries(itemCounts)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
+      .slice(0, 10) // Ubah dari 5 menjadi 10
       .map(([nameKey, quantity]) => {
         const item = items.find(i => 
           i.name.trim().toLowerCase() === nameKey
@@ -334,7 +544,7 @@ app.get('/reports/top-customers', apiKeyAuth, async (req, res) => {
 
     const topCustomers = Object.entries(customerSpending)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
+      .slice(0, 10); // Ubah dari 5 menjadi 10
 
     res.json({ status: true, data: topCustomers });
   } catch (error) {
@@ -409,6 +619,36 @@ app.get('/reports/monthly-sales', apiKeyAuth, async (req, res) => {
   }
 });
 
+// Endpoint untuk mendapatkan laporan harian
+app.get('/reports/daily/:date', apiKeyAuth, async (req, res) => {
+  const date = req.params.date; // Format YYYY-MM-DD
+  console.log(`[GET DAILY REPORT] Date: ${date}`);
+  try {
+    const dailyReportFile = `reports/daily/${date}`;
+    const dailyReport = await readJSON(dailyReportFile);
+
+    res.json({ status: true, data: dailyReport });
+  } catch (error) {
+    console.error('[GET DAILY REPORT ERROR]', error);
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
+// Endpoint untuk mendapatkan laporan bulanan
+app.get('/reports/monthly/:yearMonth', apiKeyAuth, async (req, res) => {
+  const yearMonth = req.params.yearMonth; // Format YYYY-MM
+  console.log(`[GET MONTHLY REPORT] YearMonth: ${yearMonth}`);
+  try {
+    const monthlyReportFile = `reports/monthly/${yearMonth}`;
+    const monthlyReport = await readJSON(monthlyReportFile);
+
+    res.json({ status: true, data: monthlyReport });
+  } catch (error) {
+    console.error('[GET MONTHLY REPORT ERROR]', error);
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
 // Endpoint untuk mengunduh laporan penjualan
 app.get('/reports/download', apiKeyAuth, async (req, res) => {
   console.log('[DOWNLOAD REPORT] Request received');
@@ -425,6 +665,7 @@ app.get('/reports/download', apiKeyAuth, async (req, res) => {
 
     const csvData = allSales.map(sale => {
       return sale.items.map(item => {
+        const saleDate = moment(sale.timestamp).tz('Asia/Jakarta').format();
         return `${sale.timestamp},${sale.buyer},${item.name},${item.qty},${item.price},${item.total}`;
       }).join('\n');
     }).join('\n');
@@ -450,6 +691,12 @@ app.listen(port, async () => {
     console.log('[INIT] Created data directory');
     await fs.mkdir('uploads', { recursive: true });
     console.log('[INIT] Created uploads directory');
+
+    // Buat direktori untuk laporan
+    await fs.mkdir(path.join(dataPath, 'reports/daily'), { recursive: true });
+    console.log('[INIT] Created daily reports directory');
+    await fs.mkdir(path.join(dataPath, 'reports/monthly'), { recursive: true });
+    console.log('[INIT] Created monthly reports directory');
 
     const initialFiles = {
       'items': [],

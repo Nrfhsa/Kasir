@@ -484,46 +484,6 @@ app.get('/reports/stock', apiKeyAuth, async (req, res) => {
   }
 });
 
-// Route untuk mendapatkan 10 barang populer
-app.get('/popular-items', apiKeyAuth, async (req, res) => {
-  console.log('[POPULAR ITEMS] Request received');
-  try {
-    const yearMonth = moment().format('YYYY-MM');
-    const monthlyReportFile = `reports/monthly/${yearMonth}`;
-
-    const monthlyReport = await readJSON(monthlyReportFile);
-
-    if (!monthlyReport || !monthlyReport.popularItems) {
-      return res.json({ status: true, data: [] });
-    }
-
-    res.json({ status: true, data: monthlyReport.popularItems });
-  } catch (error) {
-    console.error('[POPULAR ITEMS ERROR]', error);
-    res.status(500).json({ status: false, error: error.message });
-  }
-});
-
-// Route untuk mendapatkan 10 pelanggan teratas
-app.get('/top-customers', apiKeyAuth, async (req, res) => {
-  console.log('[TOP CUSTOMERS] Request received');
-  try {
-    const yearMonth = moment().format('YYYY-MM');
-    const monthlyReportFile = `reports/monthly/${yearMonth}`;
-
-    const monthlyReport = await readJSON(monthlyReportFile);
-
-    if (!monthlyReport || !monthlyReport.topCustomers) {
-      return res.json({ status: true, data: [] });
-    }
-
-    res.json({ status: true, data: monthlyReport.topCustomers });
-  } catch (error) {
-    console.error('[TOP CUSTOMERS ERROR]', error);
-    res.status(500).json({ status: false, error: error.message });
-  }
-});
-
 app.get('/reports/popular', apiKeyAuth, async (req, res) => {
   console.log('[REPORT POPULAR] Request received');
   try {

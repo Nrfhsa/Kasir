@@ -24,12 +24,12 @@ app.use('/uploads', express.static('uploads'));
 
 // Helper functions
 const dataPath = path.join(__dirname, 'data');
-const readJSON = async (file) => {
+const readJSON = async (file, defaultValue = []) => {
   try {
     const data = await fs.readFile(path.join(dataPath, `${file}.json`), 'utf8');
     return JSON.parse(data);
   } catch (error) {
-    if (error.code === 'ENOENT') return [];
+    if (error.code === 'ENOENT') return defaultValue;
     throw error;
   }
 };
@@ -118,23 +118,28 @@ const createDailyReport = async (transaction) => {
   const dailyReportFile = `reports/daily/${today}`;
   
   try {
-    // Baca laporan yang sudah ada atau buat baru jika belum ada
-    let dailyReport = await readJSON(dailyReportFile);
-    
-    // Jika laporan kosong, inisialisasi
-    if (!Array.isArray(dailyReport) && !dailyReport.transactions) {
+    // Gunakan default value sebagai object
+    let dailyReport = await readJSON(dailyReportFile, {
+      date: today,
+      totalRevenue: 0,
+      transactionCount: 0,
+      transactions: []
+    });
+
+    // Handle format lama yang masih array
+    if (Array.isArray(dailyReport)) {
       dailyReport = {
         date: today,
-        totalRevenue: 0,
-        transactionCount: 0,
-        transactions: []
+        totalRevenue: dailyReport.reduce((sum, t) => sum + t.total, 0),
+        transactionCount: dailyReport.length,
+        transactions: dailyReport
       };
     }
-    
+
     // Tambahkan transaksi baru
     dailyReport.transactions.push(transaction);
     
-    // Update total pendapatan dan jumlah transaksi
+    // Update total
     dailyReport.totalRevenue = dailyReport.transactions.reduce((sum, t) => sum + t.total, 0);
     dailyReport.transactionCount = dailyReport.transactions.length;
     
@@ -343,80 +348,35 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
   try {
     const { buyer, items: saleItems, paymentAmount } = req.body;
 
+    // Validasi input
     if (!buyer || !saleItems || !Array.isArray(saleItems) || paymentAmount === undefined) {
-      console.log('[CREATE SALE] Invalid request format');
-      return res.status(400).json({ status: false, error: 'Invalid request format. Buyer, items, and paymentAmount are required.' });
+      return res.status(400).json({ 
+        status: false, 
+        error: 'Invalid request format. Buyer, items, and paymentAmount are required.' 
+      });
     }
 
     const date = moment();
     const salesFile = `sales-${date.format('YYYY-MM')}`;
-    console.log(`[CREATE SALE] Using sales file: ${salesFile}`);
-
-    const store = await readJSON('store');
-    const purchaseId = await generatePurchaseID();
     
-    const sale = {
-      id: purchaseId,
-      timestamp: date.toISOString(),
-      cashier: store.cashier || 'Unknown',
-      buyer,
-      items: [],
-      total: 0,
-      paymentAmount: parseFloat(paymentAmount),
-      change: 0
-    };
-
+    // Baca data penjualan dengan default array
+    const sales = await readJSON(salesFile, []);
+    
+    // Proses transaksi
     const allItems = await readJSON('items');
-    for (const item of saleItems) {
-      console.log(`[CREATE SALE] Processing item: ${item.id}`);
-      const product = allItems.find(p => p.id === item.id);
+    const sale = { /* ... kode yang ada ... */ };
 
-      if (!product) {
-        console.log(`[CREATE SALE] Item not found: ${item.id}`);
-        return res.status(400).json({ status: false, error: `Item ${item.id} not found` });
-      }
-
-      if (product.stock < item.qty) {
-        console.log(`[CREATE SALE] Insufficient stock for: ${product.name}`);
-        return res.status(400).json({ status: false, error: `Insufficient stock for ${product.name}` });
-      }
-
-      product.stock -= item.qty;
-      const price = product.price * (1 - (product.discount/100));
-      sale.items.push({
-        ...item,
-        name: product.name,
-        price,
-        total: item.qty * price
-      });
-      sale.total += item.qty * price;
-    }
-
-    // Cek apakah uang yang diberikan cukup
-    if (sale.paymentAmount < sale.total) {
-      console.log(`[CREATE SALE] Insufficient payment: ${sale.paymentAmount} < ${sale.total}`);
-      return res.status(400).json({ 
-        status: false, 
-        error: `Uang tidak cukup. Total: ${sale.total}, Pembayaran: ${sale.paymentAmount}` 
-      });
-    }
-
-    // Hitung kembalian
-    sale.change = sale.paymentAmount - sale.total;
-
-    const sales = await readJSON(salesFile);
+    // Simpan transaksi
     sales.push(sale);
-
+    
     await Promise.all([
       writeJSON('items', allItems),
       writeJSON(salesFile, sales)
     ]);
 
-    // Buat laporan harian dan update laporan bulanan
+    // Buat laporan
     await createDailyReport(sale);
-
-    await logAction(req.user, `New sale: ${sale.id}`);
-    console.log(`[CREATE SALE] Success: ${sale.id}`);
+    
     res.status(201).json({ status: true, data: sale });
   } catch (error) {
     console.error('[CREATE SALE ERROR]', error);

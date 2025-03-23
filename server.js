@@ -118,22 +118,22 @@ const createDailyReport = async (transaction) => {
   const dailyReportFile = `reports/daily/${today}`;
   
   try {
-    // Gunakan default value sebagai object
-    let dailyReport = await readJSON(dailyReportFile, {
-      date: today,
-      totalRevenue: 0,
-      transactionCount: 0,
-      transactions: []
-    });
-
-    // Handle format lama yang masih array
-    if (Array.isArray(dailyReport)) {
+    // Baca laporan atau inisialisasi baru
+    let dailyReport = await readJSON(dailyReportFile);
+    
+    // Handle jika file tidak ada atau format lama
+    if (!dailyReport || Array.isArray(dailyReport)) {
       dailyReport = {
         date: today,
-        totalRevenue: dailyReport.reduce((sum, t) => sum + t.total, 0),
-        transactionCount: dailyReport.length,
-        transactions: dailyReport
+        totalRevenue: 0,
+        transactionCount: 0,
+        transactions: []
       };
+    }
+
+    // Pastikan transactions ada
+    if (!dailyReport.transactions) {
+      dailyReport.transactions = [];
     }
 
     // Tambahkan transaksi baru
@@ -359,16 +359,66 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
     const date = moment();
     const salesFile = `sales-${date.format('YYYY-MM')}`;
     
-    // Baca data penjualan dengan default array
-    const sales = await readJSON(salesFile, []);
-    
-    // Proses transaksi
-    const allItems = await readJSON('items');
-    const sale = { /* ... kode yang ada ... */ };
+    // Baca atau inisialisasi data penjualan
+    let sales = await readJSON(salesFile);
+    if (!Array.isArray(sales)) {
+      sales = [];
+    }
 
-    // Simpan transaksi
-    sales.push(sale);
+    // Proses transaksi
+    const store = await readJSON('store');
+    const purchaseId = await generatePurchaseID();
     
+    const sale = {
+      id: purchaseId,
+      timestamp: date.toISOString(),
+      cashier: store.cashier || 'Unknown',
+      buyer,
+      items: [],
+      total: 0,
+      paymentAmount: parseFloat(paymentAmount),
+      change: 0
+    };
+
+    const allItems = await readJSON('items');
+    
+    // Proses setiap item
+    for (const item of saleItems) {
+      const product = allItems.find(p => p.id === item.id);
+      if (!product) {
+        return res.status(400).json({ status: false, error: `Item ${item.id} not found` });
+      }
+      
+      if (product.stock < item.qty) {
+        return res.status(400).json({ status: false, error: `Insufficient stock for ${product.name}` });
+      }
+
+      product.stock -= item.qty;
+      const price = product.price * (1 - (product.discount/100));
+      
+      sale.items.push({
+        id: item.id,
+        name: product.name,
+        qty: item.qty,
+        price,
+        total: item.qty * price
+      });
+      
+      sale.total += item.qty * price;
+    }
+
+    // Validasi pembayaran
+    if (sale.paymentAmount < sale.total) {
+      return res.status(400).json({ 
+        status: false, 
+        error: `Insufficient payment. Total: ${sale.total}, Received: ${sale.paymentAmount}` 
+      });
+    }
+
+    sale.change = sale.paymentAmount - sale.total;
+
+    // Simpan data
+    sales.push(sale);
     await Promise.all([
       writeJSON('items', allItems),
       writeJSON(salesFile, sales)
@@ -376,14 +426,14 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
 
     // Buat laporan
     await createDailyReport(sale);
-    
+
+    await logAction(req.user, `New sale: ${sale.id}`);
     res.status(201).json({ status: true, data: sale });
   } catch (error) {
     console.error('[CREATE SALE ERROR]', error);
     res.status(500).json({ status: false, error: error.message });
   }
 });
-
 // Route untuk mendapatkan stok barang (diurutkan berdasarkan stok paling sedikit)
 app.get('/stock', apiKeyAuth, async (req, res) => {
   console.log('[GET STOCK] Request received');

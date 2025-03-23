@@ -71,20 +71,20 @@ const apiKeyAuth = async (req, res, next) => {
 const generatePurchaseID = async () => {
   const now = moment();
   const formattedDate = now.format('DDMMYY');
-  
+
   // Dapatkan tanggal hari ini dalam format YYYY-MM-DD untuk nama file laporan
   const today = now.format('YYYY-MM-DD');
   const dailyReportFile = `reports/daily/${today}`;
-  
+
   try {
     // Baca laporan harian untuk menentukan nomor urut pembeli
     const dailyReport = await readJSON(dailyReportFile);
     // Jika sudah ada transaksi hari ini, ambil jumlah transaksi + 1, jika belum, mulai dari 1
     const orderNumber = dailyReport.transactions ? dailyReport.transactions.length + 1 : 1;
-    
+
     // Format nomor urut dengan padding 3 digit
     const formattedOrderNumber = orderNumber.toString().padStart(3, '0');
-    
+
     const purchaseID = `${formattedDate}${formattedOrderNumber}`;
     console.log(`[GENERATE PURCHASE ID] New ID: ${purchaseID}`);
     return purchaseID;
@@ -101,7 +101,7 @@ const logAction = async (user, action) => {
   try {
     const logs = await readJSON('logs');
     logs.push({ 
-      timestamp: moment().toISOString(),
+      timestamp: moment().format(),
       user,
       action 
     });
@@ -116,11 +116,11 @@ const createDailyReport = async (transaction) => {
   const now = moment();
   const today = now.format('YYYY-MM-DD');
   const dailyReportFile = `reports/daily/${today}`;
-  
+
   try {
     // Baca laporan atau inisialisasi baru
     let dailyReport = await readJSON(dailyReportFile);
-    
+
     // Handle jika file tidak ada atau format lama
     if (!dailyReport || Array.isArray(dailyReport)) {
       dailyReport = {
@@ -138,18 +138,18 @@ const createDailyReport = async (transaction) => {
 
     // Tambahkan transaksi baru
     dailyReport.transactions.push(transaction);
-    
+
     // Update total
     dailyReport.totalRevenue = dailyReport.transactions.reduce((sum, t) => sum + t.total, 0);
     dailyReport.transactionCount = dailyReport.transactions.length;
-    
+
     // Simpan laporan
     await writeJSON(dailyReportFile, dailyReport);
     console.log(`[DAILY REPORT] Updated for ${today}`);
-    
+
     // Update laporan bulanan
     await updateMonthlyReport(transaction);
-    
+
     return dailyReport;
   } catch (error) {
     console.error('[DAILY REPORT ERROR]', error);
@@ -162,11 +162,11 @@ const updateMonthlyReport = async (transaction) => {
   const now = moment();
   const yearMonth = now.format('YYYY-MM');
   const monthlyReportFile = `reports/monthly/${yearMonth}`;
-  
+
   try {
     // Baca laporan yang sudah ada atau buat baru jika belum ada
     let monthlyReport = await readJSON(monthlyReportFile);
-    
+
     // Jika laporan kosong, inisialisasi
     if (!Array.isArray(monthlyReport) && !monthlyReport.transactions) {
       monthlyReport = {
@@ -183,14 +183,14 @@ const updateMonthlyReport = async (transaction) => {
     if (!monthlyReport.transactions) {
       monthlyReport.transactions = [];
     }
-    
+
     // Tambahkan transaksi baru
     monthlyReport.transactions.push(transaction);
-    
+
     // Update total pendapatan dan jumlah transaksi
     monthlyReport.totalRevenue = monthlyReport.transactions.reduce((sum, t) => sum + t.total, 0);
     monthlyReport.transactionCount = monthlyReport.transactions.length;
-    
+
     // Update data pelanggan
     const customerSpending = {};
     for (const t of monthlyReport.transactions) {
@@ -199,13 +199,13 @@ const updateMonthlyReport = async (transaction) => {
       }
       customerSpending[t.buyer] += t.total;
     }
-    
+
     // Sortir pelanggan berdasarkan total belanja
     monthlyReport.topCustomers = Object.entries(customerSpending)
       .map(([customer, total]) => ({ customer, total }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
-    
+
     // Update data barang populer
     const itemCounts = {};
     for (const t of monthlyReport.transactions) {
@@ -220,16 +220,16 @@ const updateMonthlyReport = async (transaction) => {
         itemCounts[item.id].quantity += item.qty;
       }
     }
-    
+
     // Sortir barang berdasarkan jumlah terjual
     monthlyReport.popularItems = Object.values(itemCounts)
       .sort((a, b) => b.quantity - a.quantity)
       .slice(0, 10);
-    
+
     // Simpan laporan
     await writeJSON(monthlyReportFile, monthlyReport);
     console.log(`[MONTHLY REPORT] Updated for ${yearMonth}`);
-    
+
     return monthlyReport;
   } catch (error) {
     console.error('[MONTHLY REPORT ERROR]', error);
@@ -363,7 +363,7 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
 
     const date = moment();
     const salesFile = `sales-${date.format('YYYY-MM')}`;
-    
+
     // Baca atau inisialisasi data penjualan
     let sales = await readJSON(salesFile);
     if (!Array.isArray(sales)) {
@@ -373,10 +373,10 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
     // Proses transaksi
     const store = await readJSON('store');
     const purchaseId = await generatePurchaseID();
-    
+
     const sale = {
       id: purchaseId,
-      timestamp: date.toISOString(),
+      timestamp: date.format(),
       cashier: store.cashier || 'Unknown',
       buyer,
       items: [],
@@ -386,21 +386,21 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
     };
 
     const allItems = await readJSON('items');
-    
+
     // Proses setiap item
     for (const item of saleItems) {
       const product = allItems.find(p => p.id === item.id);
       if (!product) {
         return res.status(400).json({ status: false, error: `Item ${item.id} not found` });
       }
-      
+
       if (product.stock < item.qty) {
         return res.status(400).json({ status: false, error: `Insufficient stock for ${product.name}` });
       }
 
       product.stock -= item.qty;
       const price = product.price * (1 - (product.discount/100));
-      
+
       sale.items.push({
         id: item.id,
         name: product.name,
@@ -408,7 +408,7 @@ app.post('/sales', apiKeyAuth, async (req, res) => {
         price,
         total: item.qty * price
       });
-      
+
       sale.total += item.qty * price;
     }
 
@@ -463,7 +463,7 @@ app.get('/stock/category/:category', apiKeyAuth, async (req, res) => {
     const filteredItems = items
       .filter(item => item.category && item.category.toLowerCase() === category.toLowerCase())
       .sort((a, b) => a.stock - b.stock);
-    
+
     res.json({ status: true, data: filteredItems });
   } catch (error) {
     console.error('[GET STOCK BY CATEGORY ERROR]', error);
@@ -490,13 +490,13 @@ app.get('/popular-items', apiKeyAuth, async (req, res) => {
   try {
     const yearMonth = moment().format('YYYY-MM');
     const monthlyReportFile = `reports/monthly/${yearMonth}`;
-    
+
     const monthlyReport = await readJSON(monthlyReportFile);
-    
+
     if (!monthlyReport || !monthlyReport.popularItems) {
       return res.json({ status: true, data: [] });
     }
-    
+
     res.json({ status: true, data: monthlyReport.popularItems });
   } catch (error) {
     console.error('[POPULAR ITEMS ERROR]', error);
@@ -510,13 +510,13 @@ app.get('/top-customers', apiKeyAuth, async (req, res) => {
   try {
     const yearMonth = moment().format('YYYY-MM');
     const monthlyReportFile = `reports/monthly/${yearMonth}`;
-    
+
     const monthlyReport = await readJSON(monthlyReportFile);
-    
+
     if (!monthlyReport || !monthlyReport.topCustomers) {
       return res.json({ status: true, data: [] });
     }
-    
+
     res.json({ status: true, data: monthlyReport.topCustomers });
   } catch (error) {
     console.error('[TOP CUSTOMERS ERROR]', error);
@@ -666,7 +666,7 @@ app.get('/reports/daily/:date', apiKeyAuth, async (req, res) => {
   try {
     const dailyReportFile = `reports/daily/${date}`;
     const dailyReport = await readJSON(dailyReportFile);
-    
+
     res.json({ status: true, data: dailyReport });
   } catch (error) {
     console.error('[GET DAILY REPORT ERROR]', error);
@@ -681,7 +681,7 @@ app.get('/reports/monthly/:yearMonth', apiKeyAuth, async (req, res) => {
   try {
     const monthlyReportFile = `reports/monthly/${yearMonth}`;
     const monthlyReport = await readJSON(monthlyReportFile);
-    
+
     res.json({ status: true, data: monthlyReport });
   } catch (error) {
     console.error('[GET MONTHLY REPORT ERROR]', error);
@@ -705,6 +705,7 @@ app.get('/reports/download', apiKeyAuth, async (req, res) => {
 
     const csvData = allSales.map(sale => {
       return sale.items.map(item => {
+        const saleDate = moment(sale.timestamp).tz('Asia/Jakarta').format();
         return `${sale.timestamp},${sale.buyer},${item.name},${item.qty},${item.price},${item.total}`;
       }).join('\n');
     }).join('\n');
@@ -730,7 +731,7 @@ app.listen(port, async () => {
     console.log('[INIT] Created data directory');
     await fs.mkdir('uploads', { recursive: true });
     console.log('[INIT] Created uploads directory');
-    
+
     // Buat direktori untuk laporan
     await fs.mkdir(path.join(dataPath, 'reports/daily'), { recursive: true });
     console.log('[INIT] Created daily reports directory');

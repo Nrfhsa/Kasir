@@ -175,8 +175,13 @@ const updateMonthlyReport = async (transaction) => {
         transactionCount: 0,
         topCustomers: [],
         popularItems: {},
-        transactions: []
+        transactions: [] // Pastikan transactions diinisialisasi sebagai array
       };
+    }
+
+    // Pastikan transactions ada
+    if (!monthlyReport.transactions) {
+      monthlyReport.transactions = [];
     }
     
     // Tambahkan transaksi baru

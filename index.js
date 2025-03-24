@@ -11,6 +11,7 @@ const stockRouter = require('./routes/stock');
 const reportsRouter = require('./routes/reports');
 const logsRouter = require('./routes/logs');
 const storeRouter = require('./routes/store');
+const dashRouter = require('./routes/dash');
 
 app.set('trust proxy', 1);
 app.set('json spaces', 2);
@@ -24,6 +25,7 @@ app.use('/stock', stockRouter);
 app.use('/reports', reportsRouter);
 app.use('/logs', logsRouter);
 app.use('/store', storeRouter);
+app.use('/', dashRouter);
 
 app.listen(port, async () => {
   console.log(`Server running at http://localhost:${port}`);

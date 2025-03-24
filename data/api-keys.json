@@ -1,6 +1,10 @@
 [
-     {
-       "key": "DEFAULT_KEY",
-       "user": "One Clash"
-     }
+  {
+    "key": "123",
+    "user": "admin"
+  },
+  {
+    "key": "SECRET_KEY_123",
+    "user": "developer"
+  }
 ]
